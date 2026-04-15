@@ -1,0 +1,3 @@
+[submodule "WLED"]
+	path = WLED
+	url = git@github.com:aphelps/WLED.git
