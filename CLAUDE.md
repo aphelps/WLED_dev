@@ -51,6 +51,8 @@ curl -s http://192.168.1.55/json/info | python3 -m json.tool
 
 For custom build flags, create `WLED/platformio_override.ini` (see `platformio_override.sample.ini`).
 
+After cloning or adding a new skill, run `skills/install.sh` to create symlinks into `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex).
+
 ## Running Tests
 
 ```bash
