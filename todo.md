@@ -16,15 +16,6 @@
 
 ## Pending Tasks
 
-* Task: Elaborate on the todo-handler skill
-  * The goal of this skill is to take tasks off a project's todo.md file, ask
-    questions as needed to fully understand the task, develop a detailed plan
-    for completing the task, get approval for the plan, and then execute on
-    the plan once approved. When idle or waiting for approval for a todo item,
-    if sufficient resources are available move to the next unplanned todo item
-    and produce as much plan as possible without user input.
-  * **Plan:** [todo_plans/todo-handler-elaboration.md](todo_plans/todo-handler-elaboration.md)
-
 ## Approved Tasks
 
 ## Active Tasks
@@ -32,5 +23,10 @@
 ## Blocked Tasks
 
 ## Review Tasks
+
+* Task: Elaborate on the todo-handler skill
+  * **Plan:** [todo_plans/todo-handler-elaboration.md](todo_plans/todo-handler-elaboration.md)
+  * **Branch:** `todo-handler-elaboration`
+  * **PR:** https://github.com/aphelps/WLED_dev/pull/1
 
 ## Completed Tasks
