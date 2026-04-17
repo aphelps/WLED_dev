@@ -1,9 +1,6 @@
 # AMPWork's WLED Development Environment
 
 ## Ready tasks
-* Task: Adjust the sparkle effect so it fades between colors more smoothly
-  * Currently the pixels turn on and off suddently, would be better if they fade
-    in and out over several cycles.
 * Task: Build a guide to developing new effects
 
 ## Task Ideas
@@ -20,13 +17,14 @@
 
 ## Active Tasks
 
+* Task: Adjust the sparkle effect so it fades between colors more smoothly
+  * **Plan:** [todo_plans/sparkle-fade.md](todo_plans/sparkle-fade.md)
+  * **Branch:** `sparkle-smooth-fade`
+
 ## Blocked Tasks
 
 ## Review Tasks
 
-* Task: Elaborate on the todo-handler skill
-  * **Plan:** [todo_plans/todo-handler-elaboration.md](todo_plans/todo-handler-elaboration.md)
-  * **Branch:** `todo-handler-elaboration`
-  * **PR:** https://github.com/aphelps/WLED_dev/pull/2
-
 ## Completed Tasks
+
+* Task: Elaborate on the todo-handler skill — [PR #2](https://github.com/aphelps/WLED_dev/pull/2) / commit d23a86c
