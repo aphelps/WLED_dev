@@ -8,3 +8,9 @@
 2026-04-17 14:46  [PR_OPENED]       todo-handler-elaboration  https://github.com/aphelps/WLED_dev/pull/1
 2026-04-17 14:46  [MOVED]           todo-handler-elaboration  Pending Tasks → Review Tasks
 2026-04-17 14:47  [PR_OPENED]       todo-handler-elaboration  https://github.com/aphelps/WLED_dev/pull/2 (recreated as aphelps-claude-bot)
+2026-04-17 15:00  [MOVED]           sparkle-fade  Planning Task → Active Tasks
+2026-04-17 15:00  [BRANCH_CREATED]  sparkle-fade  sparkle-smooth-fade
+2026-04-17 15:01  [SUBTASK_DONE]    sparkle-fade  Implemented smooth fade with SEGENV.data targets + blendPixelColor
+2026-04-17 15:01  [SUBTASK_DONE]    sparkle-fade  Clean build confirmed (pio run -e ampworks)
+2026-04-17 15:02  [PR_OPENED]       sparkle-fade  https://github.com/aphelps/WLED_dev/pull/3
+2026-04-17 15:02  [MOVED]           sparkle-fade  Active Tasks → Review Tasks

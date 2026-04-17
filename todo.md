@@ -17,13 +17,14 @@
 
 ## Active Tasks
 
-* Task: Adjust the sparkle effect so it fades between colors more smoothly
-  * **Plan:** [todo_plans/sparkle-fade.md](todo_plans/sparkle-fade.md)
-  * **Branch:** `sparkle-smooth-fade`
-
 ## Blocked Tasks
 
 ## Review Tasks
+
+* Task: Adjust the sparkle effect so it fades between colors more smoothly
+  * **Plan:** [todo_plans/sparkle-fade.md](todo_plans/sparkle-fade.md)
+  * **Branch:** `sparkle-smooth-fade`
+  * **PR:** https://github.com/aphelps/WLED_dev/pull/3
 
 ## Completed Tasks
 
