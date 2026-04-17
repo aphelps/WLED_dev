@@ -27,6 +27,6 @@
 * Task: Elaborate on the todo-handler skill
   * **Plan:** [todo_plans/todo-handler-elaboration.md](todo_plans/todo-handler-elaboration.md)
   * **Branch:** `todo-handler-elaboration`
-  * **PR:** https://github.com/aphelps/WLED_dev/pull/1
+  * **PR:** https://github.com/aphelps/WLED_dev/pull/2
 
 ## Completed Tasks
