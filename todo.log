@@ -1,0 +1,6 @@
+2026-04-17 00:00  [MOVED]          todo-handler-elaboration  Ready Tasks → Planning Task
+2026-04-17 00:01  [PLAN_CREATED]   todo-handler-elaboration  todo_plans/todo-handler-elaboration.md
+2026-04-17 00:02  [SUBTASK_DONE]   todo-handler-elaboration  Rewrote skill.md
+2026-04-17 00:02  [SUBTASK_DONE]   todo-handler-elaboration  Created todo-template.md
+2026-04-17 00:02  [SUBTASK_DONE]   todo-handler-elaboration  Added Blocked Tasks section to todo.md; created todo.log
+2026-04-17 00:02  [MOVED]          todo-handler-elaboration  Planning Task → Pending Tasks
