@@ -54,6 +54,7 @@
   * **Plan:** [todo_plans/short-title.md](todo_plans/short-title.md)
   * **Branch:** `feature/short-branch-name`
   * **PR:** https://github.com/owner/repo/pull/123
+  * **Submodule PRs:** `libs/foo`: https://github.com/owner/foo/pull/45
 -->
 
 ## Completed Tasks

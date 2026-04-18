@@ -19,11 +19,15 @@ Task Ideas → Ready Tasks → Planning Task → Pending Tasks → Approved Task
 ## Directory Layout
 
 ```
-todo.md          # task list and state tracking
-todo.log         # append-only timestamped action log
+todo.md          # task list and state tracking       ← local only, not committed
+todo.log         # append-only timestamped action log ← local only, not committed
 todo_plans/
-  <task-slug>.md # one plan file per task
+  <task-slug>.md # one plan file per task             ← local only, not committed
 ```
+
+`todo.md`, `todo.log`, and `todo_plans/` are **not committed to the repository**.
+Multiple tasks run in parallel on different branches; committing these shared files
+causes merge conflicts. All three must be listed in `.gitignore`.
 
 ## todo.md Sections
 
@@ -46,7 +50,8 @@ todo_plans/
   * <goal description>
   * **Plan:** [todo_plans/<task-slug>.md](todo_plans/<task-slug>.md) _(added during planning)_
   * **Branch:** `<kebab-case-branch-name>` _(set when execution starts)_
-  * **PR:** <PR URL or number> _(set when PR is opened)_
+  * **PR:** <base repo PR URL> _(set when PR is opened)_
+  * **Submodule PRs:** `<submodule-path>`: <PR URL> _(one line per affected submodule; omit if none)_
   * **Notes:** <context, decisions, links>
   * **Blocked by:** <reason> _(Blocked Tasks section only)_
 ```
@@ -124,16 +129,27 @@ Always append to `todo.log`; never edit past entries.
 
 1. If the task has no branch yet:
    - Choose a concise branch name (<40 chars, kebab-case).
-   - Create the branch in the repo and any affected submodules.
-   - Record branch name in the task entry; log `BRANCH_CREATED`.
+   - Determine the remote default base: use `origin/main` if it exists, otherwise `origin/master`.
+   - Fetch the remote base: `git fetch origin <base>`.
+   - Create the parent repo branch from the remote ref: `git checkout -b <branch> origin/<base>`.
+   - For each submodule that will be modified: `git fetch origin <base>` inside the submodule,
+     then `git checkout -b <branch> origin/<base>`. Use the **same branch name** as the parent repo.
+   - Record the branch name in the task entry; log `BRANCH_CREATED`.
 2. Work through each subtask in the plan file, marking `[x]` as each completes.
    Log `SUBTASK_DONE` for each completed subtask.
 3. Update `todo.md` and the plan file after each subtask so state is recoverable.
 4. Follow the project's code style conventions.
 5. Add unit / integration tests where applicable; all must pass before opening a PR.
 6. Build the project and confirm it compiles / passes tests cleanly.
-7. When all subtasks complete: commit, push, open PR.
-   Move task to **Review Tasks**; record PR link in task entry; log `PR_OPENED`. Notify user.
+7. When all subtasks complete:
+   - For each submodule with new commits on the task branch:
+     a. Push the submodule branch: `git push origin <branch>` from inside the submodule.
+     b. Open a submodule PR targeting the submodule's default branch. In the description,
+        include: "Part of <base-repo-PR-URL> in the parent repo."
+     c. Record the submodule PR URL in the task entry under `**Submodule PRs:**`; log `PR_OPENED`.
+   - Push the parent repo branch and open the base repo PR. In the description, include a
+     "Submodule PRs" section linking to all submodule PRs.
+   - Move task to **Review Tasks**; record all PR links in the task entry; log `PR_OPENED`. Notify user.
 
 ## PR Handling
 
@@ -142,11 +158,14 @@ Always append to `todo.log`; never edit past entries.
 3. If CI fails: diagnose root cause and push a fix before requesting re-review.
 4. If changes are requested: move task back to **Active Tasks** → **Task Execution**;
    log `MOVED … → Active Tasks`.
-5. When PR is approved and CI is green:
-   - If the base branch has new commits: rebase the PR branch onto base; resolve conflicts.
-   - Squash to a single clean commit with a descriptive message.
-   - Merge via rebase (no merge commit).
-6. Move task to **Completed Tasks**; record commit URL or hash; log `MERGED`. Delete the branch.
+5. When all PRs are approved and CI is green:
+   - **Submodule PRs first:** for each submodule PR:
+     a. If the submodule's base branch has new commits: rebase and resolve conflicts.
+     b. Squash to a single commit; merge via rebase.
+   - After all submodule PRs are merged: update the submodule pointer(s) in the parent branch and push.
+   - If the parent repo's base branch has new commits: rebase the parent branch; resolve conflicts.
+   - Squash the parent branch to a single clean commit; merge via rebase (no merge commit).
+6. Move task to **Completed Tasks**; record all commit URLs/hashes; log `MERGED`. Delete all branches (parent + submodules).
 
 ## Blocked Tasks
 
@@ -180,6 +199,6 @@ and log entries are unambiguous.
 
 - Follow the project's code style conventions for all code changes.
 - Add unit / application tests for coding tasks; all must pass before opening a PR.
-- Keep `todo.md`, plan files, and `todo.log` updated at every state transition.
+- Keep `todo.md`, plan files, and `todo.log` updated at every state transition. Never commit any of them.
 - Prefer small, focused branches over large omnibus changes.
 - Never open a PR for code that fails to compile or fails tests.
