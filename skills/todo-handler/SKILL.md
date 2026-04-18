@@ -153,8 +153,14 @@ Always append to `todo.log`; never edit past entries.
 
 ## PR Handling
 
-1. Check the PR for new comments or review requests since last check.
-2. Answer reviewer questions with inline PR comments; log `PR_UPDATED`.
+1. Check **every open PR for the task** — the base repo PR and each submodule PR listed
+   under `**Submodule PRs:**`. Review comments, CI status, and approval state for all of
+   them in the same pass. Never handle only the base repo PR in isolation.
+2. For each review comment:
+   - If the comment is clear and actionable: address it, then mark the conversation as resolved.
+   - If the comment needs clarification: reply asking the specific question, and if a user is
+     present in the current session, ask them here as well before proceeding.
+   After addressing all comments, log `PR_UPDATED`.
 3. If CI fails: diagnose root cause and push a fix before requesting re-review.
 4. If changes are requested: move task back to **Active Tasks** → **Task Execution**;
    log `MOVED … → Active Tasks`.
@@ -202,3 +208,8 @@ and log entries are unambiguous.
 - Keep `todo.md`, plan files, and `todo.log` updated at every state transition. Never commit any of them.
 - Prefer small, focused branches over large omnibus changes.
 - Never open a PR for code that fails to compile or fails tests.
+- **Never use `git reset --hard`** (or `git checkout -- .` / `git restore .`). These destroy untracked
+  and gitignored files such as `todo.md`, `todo.log`, and `todo_plans/` with no recovery path.
+  To squash branch commits safely, use `git reset --soft <ref>` which preserves the working tree.
+  To start a branch from a known remote ref, create a new branch with `git checkout -b <name> <ref>`
+  rather than resetting an existing branch in place.
