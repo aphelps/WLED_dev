@@ -1,7 +1,6 @@
 # AMPWork's WLED Development Environment
 
 ## Ready tasks
-* Task: Build a guide to developing new effects
 
 ## Task Ideas
 
@@ -20,6 +19,11 @@
 ## Blocked Tasks
 
 ## Review Tasks
+
+* Task: Build a guide to developing new effects
+  * **Plan:** [todo_plans/new-effect-guide.md](todo_plans/new-effect-guide.md)
+  * **Branch:** `new-effect-guide`
+  * **PR:** _(pending)_
 
 * Task: Adjust the sparkle effect so it fades between colors more smoothly
   * **Plan:** [todo_plans/sparkle-fade.md](todo_plans/sparkle-fade.md)

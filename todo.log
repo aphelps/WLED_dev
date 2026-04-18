@@ -14,3 +14,8 @@
 2026-04-17 15:01  [SUBTASK_DONE]    sparkle-fade  Clean build confirmed (pio run -e ampworks)
 2026-04-17 15:02  [PR_OPENED]       sparkle-fade  https://github.com/aphelps/WLED_dev/pull/3
 2026-04-17 15:02  [MOVED]           sparkle-fade  Active Tasks → Review Tasks
+2026-04-17 15:05  [MOVED]           new-effect-guide  Ready Tasks → Planning Task
+2026-04-17 15:10  [PLAN_CREATED]    new-effect-guide  todo_plans/new-effect-guide.md
+2026-04-17 15:10  [MOVED]           new-effect-guide  Planning Task → Active Tasks
+2026-04-17 15:10  [BRANCH_CREATED]  new-effect-guide  new-effect-guide
+2026-04-17 15:11  [SUBTASK_DONE]    new-effect-guide  Wrote docs/effect-development-guide.md
