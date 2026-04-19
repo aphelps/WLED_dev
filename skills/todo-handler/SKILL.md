@@ -130,10 +130,9 @@ Always append to `todo.log`; never edit past entries.
 1. If the task has no branch yet:
    - Choose a concise branch name (<40 chars, kebab-case).
    - Determine the remote default base: use `origin/main` if it exists, otherwise `origin/master`.
-   - Fetch the remote base: `git fetch origin <base>`.
-   - Create the parent repo branch from the remote ref: `git checkout -b <branch> origin/<base>`.
-   - For each submodule that will be modified: `git fetch origin <base>` inside the submodule,
-     then `git checkout -b <branch> origin/<base>`. Use the **same branch name** as the parent repo.
+   - Run `skills/todo-handler/scripts/create-task-branch.sh <branch> [submodule ...]`
+     which fetches `origin/main` (falling back to `origin/master`) and creates the branch
+     in the parent repo and each listed submodule from the remote ref.
    - Record the branch name in the task entry; log `BRANCH_CREATED`.
 2. Work through each subtask in the plan file, marking `[x]` as each completes.
    Log `SUBTASK_DONE` for each completed subtask.
@@ -170,7 +169,8 @@ Always append to `todo.log`; never edit past entries.
      b. Squash to a single commit; merge via rebase.
    - After all submodule PRs are merged: update the submodule pointer(s) in the parent branch and push.
    - If the parent repo's base branch has new commits: rebase the parent branch; resolve conflicts.
-   - Squash the parent branch to a single clean commit; merge via rebase (no merge commit).
+   - Squash the parent branch: `skills/todo-handler/scripts/squash-branch.sh origin/<base> "<message>"`.
+   - Merge via rebase (no merge commit): `gh pr merge --rebase --delete-branch`.
 6. Move task to **Completed Tasks**; record all commit URLs/hashes; log `MERGED`. Delete all branches (parent + submodules).
 
 ## Blocked Tasks
@@ -213,3 +213,51 @@ and log entries are unambiguous.
   To squash branch commits safely, use `git reset --soft <ref>` which preserves the working tree.
   To start a branch from a known remote ref, create a new branch with `git checkout -b <name> <ref>`
   rather than resetting an existing branch in place.
+- **Never use interactive commands** that open an editor or require keyboard input:
+  forbidden: `git rebase -i`, `git add -p`, `git commit` (without `-m`), `git merge` (without
+  `--no-edit`), `gh pr create` (without `--title` and `--body`). Use the helper scripts in
+  `skills/todo-handler/scripts/` for common multi-step operations.
+- **Human input is only required at three points:** (1) approving a plan, (2) confirming
+  execution should start, (3) reviewing a PR. All other steps run to completion autonomously.
+
+## Non-Interactive Command Reference
+
+Use these recipes (or the corresponding scripts) for all common operations.
+
+### Squash branch commits into one
+```bash
+# From the branch to squash; <base> is typically origin/main
+git reset --soft <base>
+git commit -m "$(cat <<'EOF'
+<commit message>
+EOF
+)"
+# Or use the script:
+skills/todo-handler/scripts/squash-branch.sh "<base>" "<commit message>"
+```
+
+### Create a task branch (parent repo + submodules)
+```bash
+git fetch origin main
+git checkout -b <branch> origin/main
+# For each submodule that will be modified:
+cd <submodule-path> && git fetch origin main && git checkout -b <branch> origin/main && cd -
+# Or use the script:
+skills/todo-handler/scripts/create-task-branch.sh <branch> [submodule-path ...]
+```
+
+### Update submodule pointer
+```bash
+git add <submodule-path>
+git commit -m "Update <submodule> submodule pointer"
+```
+
+### Open a PR (non-interactive)
+```bash
+gh pr create --title "<title>" --base main --head <branch> --body "$(cat <<'EOF'
+<body>
+EOF
+)"
+# Or use the script:
+skills/todo-handler/scripts/open-pr.sh --title "<title>" --head <branch> --body-file <file>
+```
