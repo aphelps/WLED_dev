@@ -148,6 +148,8 @@ Always append to `todo.log`; never edit past entries.
      c. Record the submodule PR URL in the task entry under `**Submodule PRs:**`; log `PR_OPENED`.
    - Push the parent repo branch and open the base repo PR. In the description, include a
      "Submodule PRs" section linking to all submodule PRs.
+   - Do **not** squash at this point — the branch may have multiple commits and that is fine.
+     Squashing happens only immediately before the final merge (see PR Handling step 5).
    - Move task to **Review Tasks**; record all PR links in the task entry; log `PR_OPENED`. Notify user.
 
 ## PR Handling
@@ -164,14 +166,17 @@ Always append to `todo.log`; never edit past entries.
    After addressing all comments, log `PR_UPDATED`.
 3. If CI fails: diagnose root cause and push a fix before requesting re-review.
 4. If changes are requested: move task back to **Active Tasks** → **Task Execution**;
-   log `MOVED … → Active Tasks`.
+   log `MOVED … → Active Tasks`. Address the feedback and push each fix as a **new
+   commit** — do not squash or rebase the branch. Reviewers need to see what changed
+   since their last review; squashing erases that signal.
 5. When all PRs are approved and CI is green:
    - **Submodule PRs first:** for each submodule PR:
      a. If the submodule's base branch has new commits: rebase and resolve conflicts.
      b. Squash to a single commit; merge via rebase.
    - After all submodule PRs are merged: update the submodule pointer(s) in the parent branch and push.
    - If the parent repo's base branch has new commits: rebase the parent branch; resolve conflicts.
-   - Squash the parent branch: `skills/todo-handler/scripts/squash-branch.sh origin/<base> "<message>"`.
+   - **Squash immediately before merge** (and only now):
+     `skills/todo-handler/scripts/squash-branch.sh origin/<base> "<message>"`.
    - Merge via rebase (no merge commit): `gh pr merge --rebase --delete-branch`.
 6. Move task to **Completed Tasks**; record all commit URLs/hashes; log `MERGED`. Delete all branches (parent + submodules).
 
