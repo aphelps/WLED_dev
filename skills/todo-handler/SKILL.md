@@ -153,12 +153,14 @@ Always append to `todo.log`; never edit past entries.
 ## PR Handling
 
 1. Check **every open PR for the task** — the base repo PR and each submodule PR listed
-   under `**Submodule PRs:**`. Review comments, CI status, and approval state for all of
-   them in the same pass. Never handle only the base repo PR in isolation.
-2. For each review comment:
-   - If the comment is clear and actionable: address it, then mark the conversation as resolved.
-   - If the comment needs clarification: reply asking the specific question, and if a user is
-     present in the current session, ask them here as well before proceeding.
+   under `**Submodule PRs:**`. For each PR, fetch **both** sources of feedback in the same pass:
+   - Review-level comments: `gh api repos/<owner>/<repo>/pulls/<n>/reviews`
+   - Inline (diff) comments: `gh api repos/<owner>/<repo>/pulls/<n>/comments`
+   These are separate API endpoints; inline comments do **not** appear in the reviews list.
+   Never handle only the base repo PR in isolation.
+2. For each unresolved comment (review-level or inline):
+   - If clear and actionable: address it, reply to the comment thread, and resolve the thread.
+   - If clarification needed: reply asking the specific question; if a user is present, ask here too.
    After addressing all comments, log `PR_UPDATED`.
 3. If CI fails: diagnose root cause and push a fix before requesting re-review.
 4. If changes are requested: move task back to **Active Tasks** → **Task Execution**;
