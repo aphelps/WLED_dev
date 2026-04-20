@@ -105,8 +105,9 @@ Always append to `todo.log`; never edit past entries.
 3. **Planning Task** present → continue **Task Planning** for it.
 4. **Pending Tasks** present → ask user if any should be approved. If yes → continue **Task Planning**.
 5. **Blocked Tasks** present → check if any blocker is resolved; if so move to **Approved Tasks** and log `UNBLOCKED`.
-6. Nothing actionable → report idle and exit.
+6. Nothing actionable → **Recurring Check** (schedule next wakeup, report idle).
 7. Otherwise → **Task Planning**.
+8. After completing the pass (any outcome) → **Recurring Check**.
 
 ## Task Planning
 
@@ -195,7 +196,34 @@ When idle and **Task Ideas** are present:
 3. **Approved Tasks** present → move first to **Active Tasks** → **Task Execution**
 4. **Ready Tasks** present → **Task Planning**
 5. **Task Ideas** present → research and annotate; do not advance
-6. Nothing actionable → report idle and exit
+6. Nothing actionable → report idle
+7. (any outcome) → **Recurring Check**
+
+## Recurring Check
+
+At the end of **every** invocation — regardless of whether work was done — call
+`ScheduleWakeup` to schedule the next idle pass. This makes continuous monitoring
+the default; the user never needs to re-invoke the skill or use `/loop`.
+
+```
+ScheduleWakeup(
+  prompt:       "<<autonomous-loop-dynamic>>",
+  delaySeconds: <see below>,
+  reason:       "<one sentence describing what was done and why this delay>"
+)
+```
+
+**Choosing `delaySeconds`:**
+
+| Situation | Delay |
+|-----------|-------|
+| Work completed this pass (push, merge, PR update) | 900s (15 min) |
+| Review Tasks present but nothing actionable yet | 1800s (30 min) |
+| Truly nothing actionable | 1800s (30 min) |
+
+Do not use delays under 300s (within the prompt-cache TTL) for idle monitoring —
+there is no benefit to polling more than once per 5 minutes when tasks and PRs
+change on the order of hours.
 
 ## Submodule todo.md Files
 
