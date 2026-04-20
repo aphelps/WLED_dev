@@ -100,6 +100,8 @@ Always append to `todo.log`; never edit past entries.
 
 ## Startup
 
+0. Run `skills/todo-handler/scripts/check-for-work.sh` — if it exits 1 (IDLE),
+   call `ScheduleWakeup` with the configured interval and stop.
 1. Read root `todo.md`; also check for `todo.md` in any git submodules.
 2. **Active Tasks** present → ask user if any should be resumed. If yes → **Task Execution**.
 3. **Planning Task** present → continue **Task Planning** for it.
@@ -203,27 +205,33 @@ When idle and **Task Ideas** are present:
 
 At the end of **every** invocation — regardless of whether work was done — call
 `ScheduleWakeup` to schedule the next idle pass. This makes continuous monitoring
-the default; the user never needs to re-invoke the skill or use `/loop`.
+the default; the user never needs to re-invoke the skill.
+
+The wait time defaults to **15 minutes (900s)** and can be overridden at invocation
+time, e.g. `/todo-handler 30m` sets a 30-minute interval for that session.
 
 ```
 ScheduleWakeup(
   prompt:       "<<autonomous-loop-dynamic>>",
-  delaySeconds: <see below>,
+  delaySeconds: <interval — default 900>,
   reason:       "<one sentence describing what was done and why this delay>"
 )
 ```
 
-**Choosing `delaySeconds`:**
+### Pre-check script
 
-| Situation | Delay |
-|-----------|-------|
-| Work completed this pass (push, merge, PR update) | 900s (15 min) |
-| Review Tasks present but nothing actionable yet | 1800s (30 min) |
-| Truly nothing actionable | 1800s (30 min) |
+Before running a full idle pass, call the lightweight pre-check script to
+determine if there is actually work to do. This minimises Claude utilisation
+on wake-ups where nothing has changed:
 
-Do not use delays under 300s (within the prompt-cache TTL) for idle monitoring —
-there is no benefit to polling more than once per 5 minutes when tasks and PRs
-change on the order of hours.
+```bash
+skills/todo-handler/scripts/check-for-work.sh [todo.md]
+# Exit 0 + "WORK: <reason>" → proceed with full idle pass
+# Exit 1 + "IDLE"           → reschedule immediately, skip the pass
+```
+
+If the script exits 1 (IDLE), call `ScheduleWakeup` again with the same
+interval and return — do not run the full idle workflow.
 
 ## Submodule todo.md Files
 
