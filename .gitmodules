@@ -3,4 +3,4 @@
 	url = https://github.com/aphelps/WLED.git
 [submodule "ArduinoLibs"]
 	path = ArduinoLibs
-	url = https://github.com/aphelps/ArduinoLibs
+	url = https://github.com/aphelps/ArduinoLibs.git

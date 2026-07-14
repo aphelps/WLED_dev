@@ -24,7 +24,7 @@ usage() {
   cat <<'USAGE'
 Usage: ./setup.sh [options]
   --no-verify        Skip the smoke build at the end.
-  --env=<pio-env>    Env to verify (default: ampworks; e.g. --env=apa102_mpr121).
+  --env=<pio-env>    Env to verify (default: ampworks; e.g. --env=esp32dev).
   -h, --help         Show this help.
 USAGE
 }
@@ -86,8 +86,10 @@ if [ ! -x "$PIO" ]; then
   info "Creating PlatformIO virtualenv (.venv) — this won't touch your global Python"
   python3 -m venv "$VENV"
   "$VENV/bin/python" -m pip install --quiet --upgrade pip
-  info "Installing PlatformIO (first run downloads a fair bit — grab a coffee)"
-  "$VENV/bin/python" -m pip install --quiet platformio
+  info "Installing the pinned PlatformIO toolchain from WLED/requirements.txt (grab a coffee)"
+  # Use the pinned requirements (platformio==6.1.16 + deps) for a reproducible toolchain,
+  # rather than bare 'pip install platformio' (latest), which can drift from what was tested.
+  "$VENV/bin/python" -m pip install --quiet -r "$REPO_ROOT/WLED/requirements.txt"
 else
   info "PlatformIO virtualenv already present — skipping install"
 fi
