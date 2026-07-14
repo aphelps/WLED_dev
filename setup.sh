@@ -51,15 +51,16 @@ command -v python3 >/dev/null 2>&1 || die "python3 not found — install Python 
 python3 -m venv --help >/dev/null 2>&1 || die "python3 venv module unavailable — install python3-venv and re-run."
 python3 -m pip --version >/dev/null 2>&1 || die "pip unavailable — install python3-pip (or ensure 'python3 -m pip' works)."
 
-# Node.js is required by WLED's web-UI build, which PlatformIO runs automatically
-# (WLED/pio-scripts/build_ui.py -> npm install && npm run build). We do NOT auto-install
-# it — a cross-platform Node install is too fragile.
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  die "Node.js/npm not found. WLED's web-UI build (run automatically by PlatformIO) needs it.
-     Install Node first, then re-run ./setup.sh:
-       https://nodejs.org   or via nvm:  https://github.com/nvm-sh/nvm"
+# Node.js is only needed to REGENERATE the web UI (WLED/pio-scripts/build_ui.py -> npm).
+# The ampworks / apa102_mpr121 firmware envs skip that step and use the committed UI
+# headers, so a firmware build does NOT require Node. Warn (don't fail) if it's absent.
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  NODE_INFO="node $(node -v) | npm $(npm -v)"
+else
+  NODE_INFO="node MISSING (only needed to rebuild the web UI; firmware builds don't need it)"
+  warn "Node.js/npm not found — fine for firmware builds. Install it only if you edit the web UI: https://nodejs.org"
 fi
-info "git $(git --version | awk '{print $3}') | python $(python3 -V 2>&1 | awk '{print $2}') | node $(node -v) | npm $(npm -v)"
+info "git $(git --version | awk '{print $3}') | python $(python3 -V 2>&1 | awk '{print $2}') | $NODE_INFO"
 
 # ---------------------------------------------------------------------------
 # 2. Submodules (WLED + ArduinoLibs)
