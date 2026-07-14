@@ -12,6 +12,24 @@ The main firmware source lives in `WLED/wled00/`. The `usermods/ampworks/` direc
 
 Uses [PlatformIO](https://platformio.org/). Configuration in `WLED/platformio.ini`.
 
+### Quick start (fresh clone)
+
+```bash
+git clone <this-repo> && cd WLED_dev
+./setup.sh                 # submodules + PlatformIO venv + verify build
+source .venv/bin/activate  # put pio on PATH (or call ./.venv/bin/pio)
+cd WLED && pio run -e ampworks
+```
+
+`setup.sh` initializes the submodules (WLED firmware + the `ArduinoLibs` submodule
+providing MPR121/Debug — vendored so there are **no machine-specific paths**), installs
+PlatformIO into an isolated `.venv`, and runs a smoke build (`--no-verify` to skip).
+Prerequisites it checks for: `git`, `python3`+venv/pip, and **Node.js/npm** (required by the
+web-UI pre-build; it does not auto-install Node). The custom envs reference ArduinoLibs via
+`${PROJECT_DIR}/../ArduinoLibs`, so the build is self-contained after `git submodule update --init`.
+
+### Manual steps (what setup.sh automates)
+
 ```bash
 # Install Python dependencies
 pip install -r WLED/requirements.txt
