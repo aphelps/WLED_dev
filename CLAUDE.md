@@ -40,7 +40,7 @@ cd WLED && npm install
 # Build web UI (runs before firmware compile automatically)
 npm run build
 
-# Compile firmware - default envs are esp32dev and ampworks
+# Compile firmware - default env is esp32dev (ampworks is super-repo-only; build it explicitly)
 cd WLED && pio run
 
 # Compile a specific environment
