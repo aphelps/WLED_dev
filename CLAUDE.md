@@ -22,11 +22,20 @@ cd WLED && pio run -e ampworks
 ```
 
 `setup.sh` initializes the submodules (WLED firmware + the `ArduinoLibs` submodule
-providing MPR121/Debug — vendored so there are **no machine-specific paths**), installs
+providing MPR121/Debug/RS485Utils + the `HMTL` reference submodule — vendored so there are
+**no machine-specific paths**), installs
 PlatformIO into an isolated `.venv`, and runs a smoke build (`--no-verify` to skip).
 Prerequisites it checks for: `git`, `python3`+venv/pip, and **Node.js/npm** (required by the
 web-UI pre-build; it does not auto-install Node). The custom envs reference ArduinoLibs via
 `${PROJECT_DIR}/../ArduinoLibs`, so the build is self-contained after `git submodule update --init`.
+
+### Submodules
+
+| Path | Repo | Role |
+|------|------|------|
+| `WLED/` | `aphelps/WLED` | The firmware itself (fork). Custom work branches from `base-wled-16.0.1`, not `main`. |
+| `ArduinoLibs/` | `aphelps/ArduinoLibs` | Shared Arduino libraries — MPR121, Debug, `RS485Utils`/`Socket` (RS485 bus), and the vendored `RS485_non_blocking` (Nick Gammon, MIT). On the firmware build path via `lib_extra_dirs`. |
+| `HMTL/` | `aphelps/HMTL` | Legacy HMTL module firmware + Python tooling. **Reference only — deliberately NOT on the PlatformIO build path.** `HMTL/Libraries/*` transitively pulls FastLED/`PixelUtil`, `EEPromUtils`, `MPR121` and `XBeeSocket`, which WLED 16 cannot build; the `rs485_bridge` usermod vendors the HMTL *wire format* (message header, type codes, CRC-8/0xD8) into a dependency-free header instead. Keep it in sync with `HMTL/Libraries/HMTLMessaging/HMTLMessaging.h`. |
 
 ### Manual steps (what setup.sh automates)
 
@@ -54,7 +63,7 @@ pio run -e ampworks --target upload
 pio device monitor -b 115200
 ```
 
-The `ampworks` environment extends `esp32dev` with `-D USERMOD_AMPWORKS -D USERMOD_MPR121`. Upload uses HTTP (not espota — macOS Sequoia blocks UDP):
+The `ampworks` environment extends `esp32dev` with `-D USERMOD_AMPWORKS -D USERMOD_MPR121 -D USERMOD_SENSOR_SYNC -D USERMOD_RS485_BRIDGE -D RS485_HARDWARE_SERIAL=2`. Upload uses HTTP (not espota — macOS Sequoia blocks UDP):
 
 ```bash
 # Flash to default device (192.168.1.55)
@@ -121,6 +130,7 @@ Usermods extend WLED by inheriting from `Usermod` (v2 API). They are registered 
 Custom usermods in this repo:
 - `usermods/ampworks/` — AMPWorks usermod; registers custom effects in `setup()`
 - `usermods/mpr121/usermod_mpr121.h` — MPR121 capacitive touch sensor; `USERMOD_ID_MPR121 = 55`; library at `ArduinoLibs/MPR121/`
+- `usermods/rs485_bridge/` — WiFi ↔ RS485 bridge for legacy HMTL modules; `USERMOD_ID_RS485_BRIDGE = 62`, `PinOwner::UM_RS485_BRIDGE`; needs `-D USERMOD_RS485_BRIDGE -D RS485_HARDWARE_SERIAL=2` (both, on ESP32) and `ArduinoLibs/{Socket,RS485Utils,RS485_non_blocking}`. Guarded so it compiles to an inert placeholder in the `usermods` wildcard/CI envs. See `usermods/rs485_bridge/readme.md`.
 
 Custom effects (in `ampworks.cpp`): AMP AI, AMP AI Audio, AMP Moving SIN, HMTL Sparkle, Touch Ripple.
 

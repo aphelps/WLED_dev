@@ -7,7 +7,8 @@
 #
 # What it does:
 #   1. Checks prerequisites (git, python3/pip, Node.js/npm).
-#   2. Initializes submodules (WLED firmware + ArduinoLibs: MPR121, Debug).
+#   2. Initializes submodules (WLED firmware + ArduinoLibs: MPR121, Debug, RS485Utils;
+#      HMTL: reference only, not on the build path).
 #   3. Installs PlatformIO into an isolated .venv (does not touch your global Python).
 #   4. Verifies with a smoke build (skip via --no-verify).
 #
@@ -72,9 +73,9 @@ fi
 info "git $(git --version | awk '{print $3}') | python $("$PYTHON" -V 2>&1 | awk '{print $2}') ($PYTHON) | node $(node -v) | npm $(npm -v)"
 
 # ---------------------------------------------------------------------------
-# 2. Submodules (WLED + ArduinoLibs)
+# 2. Submodules (WLED + ArduinoLibs + HMTL)
 # ---------------------------------------------------------------------------
-info "Initializing submodules (WLED, ArduinoLibs)"
+info "Initializing submodules (WLED, ArduinoLibs, HMTL)"
 git submodule sync --recursive
 git submodule update --init --recursive
 

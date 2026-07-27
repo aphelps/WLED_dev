@@ -4,3 +4,6 @@
 [submodule "ArduinoLibs"]
 	path = ArduinoLibs
 	url = https://github.com/aphelps/ArduinoLibs.git
+[submodule "HMTL"]
+	path = HMTL
+	url = https://github.com/aphelps/HMTL.git
