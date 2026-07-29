@@ -4,3 +4,6 @@
 [submodule "ArduinoLibs"]
 	path = ArduinoLibs
 	url = https://github.com/aphelps/ArduinoLibs.git
+[submodule "esp-now-router"]
+	path = esp-now-router
+	url = https://github.com/aphelps/esp-now-router.git

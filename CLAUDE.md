@@ -73,12 +73,19 @@ After cloning or adding a new project-level skill, run `skills/install.sh` to cr
 
 ## Running Tests
 
+A top-level `Makefile` runs the host unit tests across all submodules (pure logic — no device):
+
 ```bash
-# Test the web UI builder
-cd WLED && npm test
+make                # all host tests (WLED ampworks + esp-now-router)
+make test-wled      # just the WLED SensorSync dispatch + SPSC ring tests
+make test-router    # just the esp-now-router relay + leader-election tests
+make test-ui        # WLED web-UI builder test (needs Node)
+make test-all       # everything, incl. the UI test
 ```
 
-No C++ unit tests exist for the firmware itself; the `test/` directory structure is present but unused.
+Host C++ tests live in `WLED/usermods/ampworks/tests/` (SensorSync) and `esp-now-router/tests/`
+(relay + leader election). The router tests also run idiomatically via `pio test -e native` from
+inside `esp-now-router/`, and `make -C esp-now-router/tests coverage` gives gcov line coverage.
 
 ## Architecture
 
