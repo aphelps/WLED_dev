@@ -51,6 +51,8 @@ test-wled:
 test-bridge:
 	@echo "== WLED rs485_bridge host tests =="
 	$(call require_submodule,WLED)
+	$(call require_submodule,HMTL)
+	$(call require_submodule,ArduinoLibs)
 	@if [ ! -f WLED/usermods/rs485_bridge/tests/rs485_bridge_test.cpp ]; then \
 	  echo "-- skipped: no rs485_bridge tests at the pinned WLED revision --"; \
 	else \
