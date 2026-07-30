@@ -25,11 +25,11 @@ TWO THINGS THAT ARE EASY TO GET WRONG, both learned the hard way:
    no-ops until it has heard from someone, so relays cannot be observed passively: the probe must
    send first.
 
-2. A POLL *response* from a module is never relayed. It comes back addressed to the bridge with
-   MSG_FLAG_ACK set, and rs485b_decide() has no ACK guard, so the bridge answers it as if it were a
-   fresh poll request instead of forwarding it. That is current behaviour, tracked separately -- so
-   --emit poll --await-reply will time out, and that is not a bring-up failure. Use relayable
-   traffic instead (see the runbook's step 8).
+2. A POLL *response* comes back addressed to the bridge with MSG_FLAG_ACK set, because a module
+   replies to the poll's socket-layer source. rs485b_decide() now guards on that flag and relays it,
+   so `--emit poll --await-reply` does what its name says: you should see the module's decoded
+   response. (It did NOT before the ACK guard landed -- the bridge answered the answer and the reply
+   never reached the WiFi peer. If you are testing an older build, that timeout is the reason.)
 """
 
 import argparse
@@ -109,8 +109,10 @@ DEFAULT_UDP_PORT = 21331
 
 # The RS485 socket-layer sizes the bridge derives its transmit ceiling from. Mirrored across two repos
 # -- RS485_RECV_BUFFER in ArduinoLibs, RS485B_RECV_BUFFER_LEN in the usermod -- and the static_assert
-# tying them together compiles only under [env:ampworks], which no CI workflow builds. So --self-test
-# is the ONLY automated check that they agree; that is why it is here rather than left to the firmware.
+# tying them together compiles only under [env:ampworks]. WLED_dev CI builds that env now, so the assert
+# does run automatically -- but only in the super-repo, and only when the submodule pointers being built
+# are the ones you changed. This check is cheap, runs anywhere, and needs no toolchain, so it stays as
+# the fast local signal ahead of a five-minute CI round trip.
 RS485_RECV_BUFFER_LEN = 64
 RS485_SOCKET_HDR_LEN = 7
 RS485_TX_SLOT_LEN = RS485_RECV_BUFFER_LEN - RS485_SOCKET_HDR_LEN   # 57: the real payload ceiling
@@ -373,9 +375,9 @@ def self_test():
     #
     # RS485_RECV_BUFFER lives in ArduinoLibs and RS485B_RECV_BUFFER_LEN mirrors it in the usermod so
     # that rs485_bridge_protocol.h can stay free of Arduino.h. The firmware asserts they match, but only
-    # in [env:ampworks], which no CI job builds -- so if these drift, the transmit ceiling silently
-    # stops matching what a receiver can hold. That is the 71-vs-64 bug that motivated the derivation,
-    # and this is the only automated guard against it coming back.
+    # in [env:ampworks]. WLED_dev CI builds that env now, so drift is caught there too -- but this
+    # catches it in a second, locally, without a toolchain. If these drift the transmit ceiling silently
+    # stops matching what a receiver can hold: the 71-vs-64 bug that motivated deriving the constant.
     utils = REPO_ROOT / "ArduinoLibs/RS485Utils/RS485Utils.h"
     fw_recv = int(_scrape(utils, r"#define RS485_RECV_BUFFER\s+(\d+)")[0])
     if fw_recv != RS485_RECV_BUFFER_LEN:
@@ -512,10 +514,11 @@ def main(argv=None):
         print("\n".join(decode(data, "   ")))
     if not seen:
         print("nothing relayed back.")
-        print("If you sent a POLL: that is EXPECTED -- a module's poll response is addressed to the")
-        print("bridge with MSG_FLAG_ACK, and the bridge answers it instead of relaying it. Use")
-        print("relayable traffic (a frame for another node, a SENSOR broadcast, or TIMESYNC) and")
-        print("check the 'RS485 udp in/relayed' counter on /json/info.")
+        print("Check 'RS485 udp in/relayed' on /json/info -- if `relayed` did not move, nothing reached")
+        print("the bridge from the bus. If it DID move, the frame was relayed but did not reach this")
+        print("socket: a host firewall, or a probe that rebound its port between sending and listening.")
+        print("Note the bridge relays to the source port of the last datagram it received, so it must")
+        print("have heard from this exact socket first.")
     return 0
 
 

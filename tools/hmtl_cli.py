@@ -28,7 +28,6 @@ source, destination, length, type, flags, hex dump -- and, the part that matters
 responses WITHOUT filtering on the HMTL header address. A stock module gates everything on
 msg_hdr->address == its own (MessageHandler.cpp:78-79, no else-branch), so it silently discards the
 bridge's poll response, and you cannot tell "the bridge sent nothing" from "my module dropped it".
-That is live today: the bridge stamps its own address in a poll response rather than the requester's.
 
 WHAT THIS IS NOT: a bus sniffer. The sketch calls hmtl_socket_getmsg(&rs485, &msglen,
 config.address), which filters on the SOCKET-layer destination (RS485Socket::getMsg ->
