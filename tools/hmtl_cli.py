@@ -23,11 +23,20 @@ produces plausible-looking garbage rather than an obvious failure. Its commands 
     t <addr>   time sync
     h          help
 
-Why this sketch specifically, rather than a stock HMTL_Module: it prints EVERY frame it receives
-with source, destination, length, type, flags and a hex dump, and it decodes poll responses without
-filtering on address. A stock module drops anything not addressed to it, so you cannot tell "the
-bridge sent nothing" from "my module discarded it" -- which matters, because the bridge currently
-stamps its own address in a poll response rather than the requester's.
+Why this sketch rather than a stock HMTL_Module: it prints every frame the socket layer hands it --
+source, destination, length, type, flags, hex dump -- and, the part that matters, it decodes poll
+responses WITHOUT filtering on the HMTL header address. A stock module gates everything on
+msg_hdr->address == its own (MessageHandler.cpp:78-79, no else-branch), so it silently discards the
+bridge's poll response, and you cannot tell "the bridge sent nothing" from "my module dropped it".
+That is live today: the bridge stamps its own address in a poll response rather than the requester's.
+
+WHAT THIS IS NOT: a bus sniffer. The sketch calls hmtl_socket_getmsg(&rs485, &msglen,
+config.address), which filters on the SOCKET-layer destination (RS485Socket::getMsg ->
+SOCKET_ADDRESS_MATCH, RS485Utils.cpp:365), so a frame addressed to some other node never reaches
+process_message() at all and nothing is printed. To observe a frame here it must be addressed to
+this module's address or broadcast (0xFFFF). Point the probe at this module, not at a third node,
+or you will watch the bridge's tx counter climb while this prints nothing and conclude, wrongly,
+that the bridge never transmitted.
 
 The port is held open only for the duration of one invocation, so `pio device monitor` can be used
 between steps without fighting over it.
@@ -39,9 +48,17 @@ import time
 
 DEFAULT_BAUD = 57600   # HMTL_Command_CLI.ino: Serial.begin(57600)
 
+# Time to let an auto-reset finish before writing. USB-serial adapters assert DTR on open and an
+# ATMega328 then sits in its bootloader for ~1.5-2 s.
+RESET_SETTLE_SECS = 2.0
+
 
 def _import_serial():
-    """Import pyserial lazily so --help, --list and py_compile work without it installed."""
+    """Import pyserial lazily, so --help and py_compile work without it installed.
+
+    --list genuinely needs it (it enumerates ports through serial.tools), so that path exits
+    with the install hint rather than degrading.
+    """
     try:
         import serial  # noqa: F401
         return serial
@@ -54,7 +71,10 @@ def _import_serial():
 
 
 def list_ports():
-    serial = _import_serial()
+    # Called for its error message only -- the import below is what actually does the work. Without
+    # this, a missing pyserial surfaces as the much less helpful "list_ports unavailable" instead of
+    # the pip line that fixes it.
+    _import_serial()
     try:
         from serial.tools import list_ports as lp
     except ImportError:
@@ -75,10 +95,15 @@ def list_ports():
 def run(port, baud, cmd, listen, echo_raw=False):
     serial = _import_serial()
     with serial.Serial(port, baud, timeout=0.2) as ser:
-        # The sketch prints a banner at boot; opening the port may or may not reset the board
-        # depending on the adapter's DTR behaviour, so drain anything already buffered before
-        # sending, otherwise stale output looks like a response to this command.
-        time.sleep(0.2)
+        # FTDI/CH340/CP210x adapters assert DTR on open, which drops an ATMega328 into its
+        # bootloader for ~1.5-2 s. Writing before that finishes loses the command silently -- the
+        # bootloader eats it -- and the symptom is an empty capture that looks like a wiring or baud
+        # problem. So wait the reset out rather than draining after 200 ms and hoping.
+        #
+        # Anything the sketch printed while we waited is drained afterwards, since stale boot output
+        # would otherwise read as a response to a command we had not sent yet. Its banner is
+        # "*** HMTL_Command_CLI starting ***"; seeing that in a capture means the board just reset.
+        time.sleep(RESET_SETTLE_SECS)
         ser.reset_input_buffer()
 
         if cmd:
@@ -109,9 +134,16 @@ def run(port, baud, cmd, listen, echo_raw=False):
 
         if lines == 0:
             print(f"\n(nothing received in {listen}s)")
-            print("Check, in this order: the baud is 57600 not 115200; the right port; the sketch is")
-            print("HMTL_Command_CLI and not a stock module; and the RS485 A/B pair plus a COMMON")
-            print("GROUND between every node -- a floating ground reads as silence on both ends.")
+            print("Check, in this order:")
+            print("  1. Was the frame addressed to THIS module (or broadcast 0xFFFF)? The sketch is")
+            print("     not a sniffer -- the socket layer drops frames addressed to other nodes, so")
+            print("     traffic aimed at a third node is invisible here and looks like silence.")
+            print("  2. Did the adapter reset the board and eat the command? A capture containing")
+            print("     '*** HMTL_Command_CLI starting ***' means exactly that; raise RESET_SETTLE_SECS.")
+            print("  3. Baud 57600, not the 115200 a WLED board uses.")
+            print("  4. Right port, and the sketch really is HMTL_Command_CLI.")
+            print("  5. RS485 A/B plus a COMMON GROUND between every node -- a floating ground reads")
+            print("     as silence on both ends.")
             print("Note the sketch spells it 'Recieved', so grep for that literally.")
         return 0
 

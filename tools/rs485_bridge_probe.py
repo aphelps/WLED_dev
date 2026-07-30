@@ -142,6 +142,13 @@ def emit_value(addr, output, value):
     not segment colour, and it saturates at 255 rather than wrapping -- so sending 4096 and seeing
     full brightness is correct.
     """
+    if not 0 <= value <= 0x1FFF:
+        # Refuse rather than truncate. The docstring above primes the tester that large values are
+        # fine (they saturate at the bridge), so a silently masked 9000 -> 808 would show up as a
+        # dimmed strip that looks exactly like an applyValue mapping bug -- and step 7's failure
+        # branch would point at the wrong thing.
+        raise SystemExit(f"--value {value} is outside the 13-bit wire field (0..8191); "
+                         f"it would be silently truncated to {value & 0x1FFF}")
     frame = build_header(addr, HDR_LEN + STRUCT_SIZES["msg_value_t"], MSG_TYPE["OUTPUT"])
     frame += bytes([HMTL_OUTPUT["VALUE"], output & 0xFF])
     word = (value & 0x1FFF)
@@ -166,18 +173,18 @@ def emit_set_addr(addr, device_id, new_address):
     return stamp_crc(frame)
 
 
-def emit_timesync(addr):
-    """TIMESYNC exists here purely as a RELAY STIMULUS for the runbook's step 8.
-
-    The bridge does not decode it, so a TIMESYNC addressed to the bridge decodes as
-    RS485B_ACT_UNSUPPORTED -- which is counted *and* relayed to the WiFi peer. That makes it the
-    cheapest way to observe the relay path, since a poll response never gets relayed at all.
-    """
-    return stamp_crc(build_header(addr, HDR_LEN, MSG_TYPE["TIMESYNC"]))
-
-
+# No TIMESYNC emitter, deliberately. Two reasons, both learned from review:
+#   * A bare TIMESYNC header is not a legal frame. TimeSync::synchronize() casts straight past the
+#     header to msg_time_sync_t and switches on sync_phase with no length check, so an 8-byte frame
+#     makes the receiver read whatever stale byte follows in its buffer -- and if that lands on a
+#     valid phase it will emit unsolicited traffic and mutate its clock delta. A bench tool must not
+#     make the bus partner do something nondeterministic.
+#   * It would not have tested what it was added for. A frame sent over UDP never reaches
+#     rs485b_decide(): serviceUdp() validates and puts it straight on the bus. UNSUPPORTED-and-relay
+#     only happens for frames arriving FROM RS485. So use `hmtl_cli.py --cmd "t <bridge-addr>"` to
+#     originate TIMESYNC on the bus, which is what the runbook's step 8 actually says.
 EMITTERS = {"value": "emit_value", "rgb": "emit_rgb", "poll": "emit_poll",
-            "setaddr": "emit_set_addr", "timesync": "emit_timesync"}
+            "setaddr": "emit_set_addr"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -281,12 +288,18 @@ def self_test():
     # 1. static_assert(sizeof(X) == N) in the protocol header
     sizes = dict((m, int(n)) for m, n in
                  _scrape(proto, r"static_assert\(sizeof\((\w+)\)\s*==\s*(\d+)"))
+    checked_sizes = []
     for name, expected in STRUCT_SIZES.items():
-        if name in sizes and sizes[name] != expected:
+        if name not in sizes:
+            # UNCONFIRMED IS A FAILURE, not a skip. `_scrape` only raises when a regex matches
+            # nothing at all, so a single deleted or renamed assertion would otherwise be passed
+            # over in silence -- and the two most load-bearing entries here (output_hdr_t's field
+            # order, msg_value_t's size) are exactly the kind that get edited.
+            problems.append(f"sizeof({name}): no static_assert found in the firmware to check against")
+            continue
+        checked_sizes.append(name)
+        if sizes[name] != expected:
             problems.append(f"sizeof({name}): firmware says {sizes[name]}, table says {expected}")
-    checked_sizes = [n for n in STRUCT_SIZES if n in sizes]
-    if not checked_sizes:
-        problems.append("no struct sizes matched -- the static_assert block moved or was renamed")
 
     # 2. HMTL_MSG_POLL_MIN_LEN
     poll = _scrape(proto, r"HMTL_MSG_POLL_MIN_LEN\s*==\s*(\d+)")
@@ -298,10 +311,16 @@ def self_test():
     fw_offsets = {}
     for struct, field, val in offs:
         fw_offsets.setdefault(struct, {})[field] = int(val)
+    checked_offsets = 0
     for struct, fields in STRUCT_OFFSETS.items():
         for field, expected in fields.items():
             got = fw_offsets.get(struct, {}).get(field)
-            if got is not None and got != expected:
+            if got is None:
+                problems.append(f"offsetof({struct}, {field}): no CHECK found in the firmware "
+                                "to check against")
+                continue
+            checked_offsets += 1
+            if got != expected:
                 problems.append(f"offsetof({struct}, {field}): firmware {got}, table {expected}")
 
     # 4. msg_hdr_t's offsets are pinned by POINTER ARITHMETIC, not offsetof -- a scraper that looks
@@ -310,6 +329,28 @@ def self_test():
     for field, val in hdr_checks:
         if HDR_LAYOUT.get(field) != int(val):
             problems.append(f"msg_hdr_t.{field}: firmware {val}, table {HDR_LAYOUT.get(field)}")
+
+    # ---- msg_value_t's bitfield: the one field no offset table can express, and the one the
+    # emitter hand-encodes. Python round-tripping it against Python proves nothing; if the
+    # declaration order ever flipped to `flags : 3; value : 13`, every VALUE command on the bench
+    # would land as ~0 and this check is what would say so. The host test pins the byte layout
+    # directly, so scrape that.
+    bits = _scrape(tests, r"mvb\[2\] == (0x[0-9A-Fa-f]+) && mvb\[3\] == (0x[0-9A-Fa-f]+)")
+    if len(bits) < 2:
+        problems.append("msg_value_t bitfield: expected two byte-layout CHECKs in the host test, "
+                        f"found {len(bits)}")
+    else:
+        want_val_lo, want_val_hi = int(bits[0][0], 0), int(bits[0][1], 0)   # value = 0x1FFF
+        want_flg_lo, want_flg_hi = int(bits[1][0], 0), int(bits[1][1], 0)   # flags = 0x7
+        got = emit_value(0, 0, 0x1FFF)[HDR_LEN + 2:HDR_LEN + 4]
+        if got[0] != want_val_lo or got[1] != want_val_hi:
+            problems.append(f"msg_value_t: value=0x1FFF should be "
+                            f"{want_val_lo:#04x},{want_val_hi:#04x} but the probe emits "
+                            f"{got[0]:#04x},{got[1]:#04x}")
+        if (want_flg_lo, want_flg_hi) != (0x00, 0xE0):
+            problems.append(f"msg_value_t: the firmware puts flags at "
+                            f"{want_flg_lo:#04x},{want_flg_hi:#04x}; this probe assumes the top "
+                            "three bits (0x00,0xE0) and would encode `value` into the wrong bits")
 
     # 5. Constants straight from the wire format header.
     for macro, expected in (("HMTL_MSG_START", HMTL_MSG_START),
@@ -324,17 +365,19 @@ def self_test():
     for frame, label in ((emit_rgb(3, 0, (255, 0, 0)), "rgb"),
                          (emit_value(3, 0, 200), "value"),
                          (emit_poll(3), "poll"),
-                         (emit_set_addr(3, 42, 7), "setaddr"),
-                         (emit_timesync(3), "timesync")):
+                         (emit_set_addr(3, 42, 7), "setaddr")):
         if frame[0] != HMTL_MSG_START or frame[3] != len(frame):
             problems.append(f"{label}: emitted frame is self-inconsistent")
         if crc8_hmtl(frame) != frame[1]:
             problems.append(f"{label}: CRC does not verify against its own frame")
         decode(frame)
 
-    print(f"checked {len(checked_sizes)} struct sizes, "
-          f"{sum(len(v) for v in STRUCT_OFFSETS.values())} field offsets, "
-          f"{len(hdr_checks)} header offsets, 4 constants, 5 round-trips")
+    # Report what was actually CONFIRMED against the firmware, not the size of the Python table --
+    # otherwise the summary overstates coverage the moment an assertion goes missing.
+    print(f"confirmed against the firmware: {len(checked_sizes)}/{len(STRUCT_SIZES)} struct sizes, "
+          f"{checked_offsets}/{sum(len(v) for v in STRUCT_OFFSETS.values())} field offsets, "
+          f"{len(hdr_checks)} header offsets, 4 constants, "
+          f"the msg_value_t bitfield layout, 4 round-trips")
     if problems:
         print("\nSELF-TEST FAILED -- the Python layout table and the firmware disagree:")
         for p in problems:
@@ -383,18 +426,23 @@ def main(argv=None):
     if args.emit == "rgb":
         if not args.rgb:
             ap.error("--emit rgb needs --rgb R,G,B")
-        rgb = [int(x) for x in args.rgb.split(",")]
+        try:
+            rgb = [int(x) for x in args.rgb.split(",")]
+        except ValueError:
+            ap.error("--rgb wants three integers, e.g. --rgb 255,0,0")
         if len(rgb) != 3:
             ap.error("--rgb wants exactly three comma-separated values")
+        # Validate here rather than letting bytes() raise: a bench tool should say what is wrong,
+        # not print a traceback out of its own internals.
+        if any(not 0 <= c <= 255 for c in rgb):
+            ap.error(f"--rgb {args.rgb}: each channel must be 0..255")
         frame = emit_rgb(args.addr, args.output, rgb)
     elif args.emit == "value":
         frame = emit_value(args.addr, args.output, args.value)
     elif args.emit == "poll":
         frame = emit_poll(args.addr)
-    elif args.emit == "setaddr":
-        frame = emit_set_addr(args.addr, args.device_id, args.new_address)
     else:
-        frame = emit_timesync(args.addr)
+        frame = emit_set_addr(args.addr, args.device_id, args.new_address)
 
     if args.hex:
         print(frame.hex(" "))
