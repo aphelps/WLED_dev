@@ -30,13 +30,36 @@ define require_submodule
 	fi
 endef
 
+# How a missing suite is reported. Unset (the default, for humans): a note, exit 0 — see the comment
+# above. STRICT=1 (what CI passes): a failure. In CI the lenient default is actively harmful — a
+# skipped suite reports the same green as a passing one, so a submodule pointer landing on a
+# revision without tests silently drops that coverage. That is not hypothetical: main briefly
+# pinned esp-now-router at its README-only commit and the router suites vanished from `make test`
+# without any signal.
+#
+# Lenient only when STRICT is unset/empty or an explicit off-switch; ANY other value is strict.
+# Deliberately asymmetric: a typo'd STRICT should fail loudly rather than silently drop coverage,
+# which is the whole failure mode this exists to prevent. (`ifdef` was wrong here — it tests
+# definedness, so `STRICT=0` would have been strict.)
+#
+# $(1) must not contain a comma: `$(call)` splits on commas and would truncate the message.
+# The off-list carries the usual capitalisations because make's filter-out is case-sensitive: without
+# them `STRICT=OFF` would be strict and report "ERROR: … (STRICT=OFF — a skipped suite is a failure)",
+# which reads as a contradiction to whoever just typed OFF.
+STRICT ?=
+ifeq ($(filter-out 0 no No NO false False FALSE off Off OFF,$(strip $(STRICT))),)
+missing_tests = echo "-- skipped: $(1) --"
+else
+missing_tests = echo "ERROR: $(1) (STRICT=$(STRICT) — a skipped suite is a failure in CI)"; exit 1
+endif
+
 # WLED (ampworks): the SensorSync dispatch + SPSC ring host tests. Compiled from their own dir so
 # the relative "../sensor_sync_*.h" includes resolve.
 test-wled:
 	@echo "== WLED ampworks host tests =="
 	$(call require_submodule,WLED)
 	@if [ ! -d WLED/usermods/ampworks/tests ]; then \
-	  echo "-- skipped: no tests/ at the pinned WLED revision --"; \
+	  $(call missing_tests,no tests/ at the pinned WLED revision); \
 	else \
 	  cd WLED/usermods/ampworks/tests && for t in sensor_sync_test sensor_sync_ring_test; do \
 	    echo "-- $$t --"; \
@@ -54,7 +77,7 @@ test-bridge:
 	$(call require_submodule,HMTL)
 	$(call require_submodule,ArduinoLibs)
 	@if [ ! -f WLED/usermods/rs485_bridge/tests/rs485_bridge_test.cpp ]; then \
-	  echo "-- skipped: no rs485_bridge tests at the pinned WLED revision --"; \
+	  $(call missing_tests,no rs485_bridge tests at the pinned WLED revision); \
 	else \
 	  echo "-- rs485_bridge_test (native ABI) --"; \
 	  $(CXX) $(CXXFLAGS) -I HMTL/Libraries/HMTLprotocol -I ArduinoLibs/Socket \
@@ -73,7 +96,7 @@ test-libs:
 	@echo "== ArduinoLibs host tests =="
 	$(call require_submodule,ArduinoLibs)
 	@if [ ! -f ArduinoLibs/test/Makefile ]; then \
-	  echo "-- skipped: no test/ at the pinned ArduinoLibs revision --"; \
+	  $(call missing_tests,no test/ at the pinned ArduinoLibs revision); \
 	else \
 	  $(MAKE) --no-print-directory -C ArduinoLibs/test test; \
 	fi
@@ -85,7 +108,7 @@ test-router:
 	@echo "== esp-now-router host tests =="
 	$(call require_submodule,esp-now-router)
 	@if [ ! -f esp-now-router/tests/Makefile ]; then \
-	  echo "-- skipped: no tests/ at the pinned esp-now-router revision --"; \
+	  $(call missing_tests,no tests/ at the pinned esp-now-router revision); \
 	else \
 	  $(MAKE) --no-print-directory -C esp-now-router/tests test; \
 	fi
