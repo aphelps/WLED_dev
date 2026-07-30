@@ -9,7 +9,7 @@
 #   1. Checks prerequisites (git, python3/pip, Node.js/npm).
 #   2. Initializes submodules (WLED firmware + ArduinoLibs: MPR121, Debug, RS485Utils;
 #      HMTL: HMTLprotocol supplies the RS485 bridge's wire format, on the build path
-#      via lib_extra_dirs).
+#      via lib_extra_dirs; esp-now-router).
 #   3. Installs PlatformIO into an isolated .venv (does not touch your global Python).
 #   4. Verifies with a smoke build (skip via --no-verify).
 #
@@ -76,7 +76,7 @@ info "git $(git --version | awk '{print $3}') | python $("$PYTHON" -V 2>&1 | awk
 # ---------------------------------------------------------------------------
 # 2. Submodules (WLED + ArduinoLibs + HMTL)
 # ---------------------------------------------------------------------------
-info "Initializing submodules (WLED, ArduinoLibs, HMTL)"
+info "Initializing submodules (WLED, ArduinoLibs, HMTL, esp-now-router)"
 git submodule sync --recursive
 git submodule update --init --recursive
 

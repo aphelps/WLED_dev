@@ -37,6 +37,7 @@ self-contained after `git submodule update --init`.
 | `WLED/` | `aphelps/WLED` | The firmware itself (fork). Custom work branches from `base-wled-16.0.1`, not `main`. |
 | `ArduinoLibs/` | `aphelps/ArduinoLibs` | Shared Arduino libraries — MPR121, Debug, `RS485Utils`/`Socket` (RS485 bus), and the vendored `RS485_non_blocking` (Nick Gammon, MIT). On the firmware build path via `lib_extra_dirs`. |
 | `HMTL/` | `aphelps/HMTL` | Legacy HMTL module firmware + Python tooling, **and the source of truth for the HMTL wire format**. `HMTL/Libraries` is on the firmware build path via `lib_extra_dirs` (`[env:ampworks]`), but only `HMTLprotocol` is ever compiled in: `rs485_bridge` imports `HMTLprotocol/HMTLWireFormat.h` — a dependency-free header (`<stdint.h>` + `Socket.h`, never `Arduino.h`) holding `msg_hdr_t`, the `MSG_TYPE_*`/`MSG_FLAG_*` codes, the `msg_*` payload structs, `output_hdr_t`, `config_hdr_t` and the `HMTL_OUTPUT_*`/`HMTL_PROGRAM_*` codes. Nothing includes `HMTLTypes.h` or `HMTLMessaging.h`: their sources pull FastLED/`PixelUtil`, `EEPromUtils`, `MPR121` and `XBeeSocket`, which WLED 16 cannot build. There is no second copy of the wire format to keep in sync. |
+| `esp-now-router/` | `aphelps/esp-now-router` | ESP-NOW multi-hop relay + leader election (added on `main` 2026-07-29, `7916e67`). Host tests run via the top-level `make test-router`; see `esp-now-router/tests/`. Not on the firmware build path. |
 
 ### Manual steps (what setup.sh automates)
 
@@ -83,12 +84,19 @@ After cloning or adding a new project-level skill, run `skills/install.sh` to cr
 
 ## Running Tests
 
+A top-level `Makefile` runs the host unit tests across all submodules (pure logic — no device):
+
 ```bash
-# Test the web UI builder
-cd WLED && npm test
+make                # all host tests (WLED ampworks + esp-now-router)
+make test-wled      # just the WLED SensorSync dispatch + SPSC ring tests
+make test-router    # just the esp-now-router relay + leader-election tests
+make test-ui        # WLED web-UI builder test (needs Node)
+make test-all       # everything, incl. the UI test
 ```
 
-No C++ unit tests exist for the firmware itself; the `test/` directory structure is present but unused.
+Host C++ tests live in `WLED/usermods/ampworks/tests/` (SensorSync) and `esp-now-router/tests/`
+(relay + leader election). The router tests also run idiomatically via `pio test -e native` from
+inside `esp-now-router/`, and `make -C esp-now-router/tests coverage` gives gcov line coverage.
 
 ## Architecture
 
