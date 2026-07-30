@@ -1,0 +1,97 @@
+name: WLED_dev CI (AMPWorks envs)
+
+# The custom envs (ampworks, apa102_mpr121, display_only) can only be built here. They live in the
+# WLED fork's platformio.ini but depend on libraries vendored as submodules of THIS repo
+# (../ArduinoLibs for MPR121/Debug/RS485Utils, ../HMTL/Libraries for the HMTL wire format), and they
+# are not in the fork's default_envs — so the fork's own build.yml never builds them. This workflow
+# fills that gap, and by running setup.sh it also proves the from-a-fresh-clone bootstrap still works.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR makes the in-flight run irrelevant. Pushes to main are deliberately
+# NOT cancelled: two merges landing close together would otherwise cancel the first merge commit's
+# run and leave a commit on main with no build result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: host tests + firmware builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      # WLED 16.x's build scripts need >= 3.10, and WLED/requirements.txt is pinned for 3.11.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: WLED/requirements.txt
+
+      # The firmware will not compile without the generated wled00/html_*.h, which the web-UI build
+      # produces — hence Node here rather than only for UI work.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: WLED/.nvmrc
+          cache: npm
+          cache-dependency-path: WLED/package-lock.json
+
+      # The ESP32 toolchain — multiple GB, and by far the dominant cost of a cold run. This is the
+      # only explicit cache step (setup-python and setup-node cache pip/npm themselves, and the notes
+      # below cover why libdeps and build objects are cached nowhere), and it is keyed ONLY on inputs
+      # that actually change it: everything above shares one 10 GB repo budget with LRU eviction, so
+      # a key that moved per-commit would evict the toolchain within a few submodule pointer bumps
+      # and bring cold downloads back.
+      - name: Cache the PlatformIO toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-toolchain-${{ runner.os }}-${{ hashFiles('WLED/platformio.ini', 'WLED/requirements.txt') }}
+          restore-keys: |
+            pio-toolchain-${{ runner.os }}-
+
+      # WLED/.pio/libdeps is deliberately NOT cached. ampworks' lib_deps point at paths inside the
+      # ArduinoLibs and HMTL submodules, and PlatformIO *copies* those into .pio/libdeps/<env>/ and
+      # builds the copy rather than the source. No cache key can track that correctly: a submodule
+      # pointer bump moves a gitlink in this repo and leaves platformio.ini untouched, so an
+      # ArduinoLibs-only change would restore a pre-change copy and compile against it — green,
+      # against the old code. That would silently defeat the cross-repo static_asserts in
+      # usermod_rs485_bridge.cpp, which are the main thing building ampworks here actually buys us.
+      # Re-resolving costs seconds against a step dominated by the toolchain.
+
+      # Compiled objects (WLED/.pio/build and the SCons build_cache_dir) are intentionally NOT cached.
+      # tools/set_build_info.py appends a fresh WLED_BUILD_TIME to the global CPPDEFINES on every run,
+      # so every translation unit's compile line differs run-to-run and nothing restored is reusable.
+      # Caching them would move hundreds of MB per run for zero hits.
+
+      # setup.sh is the same path a human runs from a fresh clone, so CI breaking on it is a real
+      # signal. --no-verify skips its smoke build; the explicit builds below are the coverage.
+      - name: Bootstrap (setup.sh)
+        run: ./setup.sh --no-verify
+
+      # Seconds, no toolchain needed — so run before the expensive step and fail fast. STRICT=1 turns
+      # "no tests at this submodule's pinned revision" from a skip into a failure: in CI a silent skip
+      # is indistinguishable from a pass, which is how the router suites once vanished unnoticed.
+      - name: Host tests (all submodules)
+        run: make test STRICT=1
+
+      # One invocation: the three envs share a toolchain and a venv, so this is much cheaper than a
+      # matrix that would re-bootstrap per leg.
+      - name: Build the custom firmware envs
+        working-directory: WLED
+        run: ../.venv/bin/pio run -e ampworks -e apa102_mpr121 -e display_only
