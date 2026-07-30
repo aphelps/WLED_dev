@@ -107,6 +107,14 @@ HMTL_MSG_POLL_MIN_LEN = 23
 
 DEFAULT_UDP_PORT = 21331
 
+# The RS485 socket-layer sizes the bridge derives its transmit ceiling from. Mirrored across two repos
+# -- RS485_RECV_BUFFER in ArduinoLibs, RS485B_RECV_BUFFER_LEN in the usermod -- and the static_assert
+# tying them together compiles only under [env:ampworks], which no CI workflow builds. So --self-test
+# is the ONLY automated check that they agree; that is why it is here rather than left to the firmware.
+RS485_RECV_BUFFER_LEN = 64
+RS485_SOCKET_HDR_LEN = 7
+RS485_TX_SLOT_LEN = RS485_RECV_BUFFER_LEN - RS485_SOCKET_HDR_LEN   # 57: the real payload ceiling
+
 
 def crc8_hmtl(buf):
     """CRC-8 over a whole frame, poly 0xD8, MSB-first, init 0, with byte 1 (the crc field) as zero.
@@ -361,6 +369,32 @@ def self_test():
         if int(got, 0) != expected:
             problems.append(f"{macro}: firmware {got}, table {expected}")
 
+    # 5b. The socket-layer buffer mirror, which nothing else checks.
+    #
+    # RS485_RECV_BUFFER lives in ArduinoLibs and RS485B_RECV_BUFFER_LEN mirrors it in the usermod so
+    # that rs485_bridge_protocol.h can stay free of Arduino.h. The firmware asserts they match, but only
+    # in [env:ampworks], which no CI job builds -- so if these drift, the transmit ceiling silently
+    # stops matching what a receiver can hold. That is the 71-vs-64 bug that motivated the derivation,
+    # and this is the only automated guard against it coming back.
+    utils = REPO_ROOT / "ArduinoLibs/RS485Utils/RS485Utils.h"
+    fw_recv = int(_scrape(utils, r"#define RS485_RECV_BUFFER\s+(\d+)")[0])
+    if fw_recv != RS485_RECV_BUFFER_LEN:
+        problems.append(f"RS485_RECV_BUFFER: ArduinoLibs says {fw_recv}, this table says "
+                        f"{RS485_RECV_BUFFER_LEN}")
+    mirror = int(_scrape(proto, r"#define RS485B_RECV_BUFFER_LEN\s+(\d+)")[0])
+    if mirror != fw_recv:
+        problems.append(f"the usermod's RS485B_RECV_BUFFER_LEN ({mirror}) does not match ArduinoLibs' "
+                        f"RS485_RECV_BUFFER ({fw_recv}) -- the transmit ceiling and the receive budget "
+                        "have drifted apart")
+    hdr_mirror = int(_scrape(proto, r"#define RS485B_SOCKET_HDR_LEN\s+(\d+)")[0])
+    if hdr_mirror != RS485_SOCKET_HDR_LEN:
+        problems.append(f"RS485B_SOCKET_HDR_LEN: firmware {hdr_mirror}, table {RS485_SOCKET_HDR_LEN}")
+    # And that the slot really is derived rather than re-hardcoded.
+    slot_def = _scrape(proto, r"#define RS485B_TX_SLOT_LEN\s+(.+)")[0].strip()
+    if "RS485B_RECV_BUFFER_LEN" not in slot_def or "RS485B_SOCKET_HDR_LEN" not in slot_def:
+        problems.append(f"RS485B_TX_SLOT_LEN is no longer derived from the buffer minus the header: "
+                        f"{slot_def!r}. Re-hardcoding it is how the 71-vs-64 drop happened.")
+
     # 6. Round-trip every emitter through the decoder.
     for frame, label in ((emit_rgb(3, 0, (255, 0, 0)), "rgb"),
                          (emit_value(3, 0, 200), "value"),
@@ -377,7 +411,7 @@ def self_test():
     print(f"confirmed against the firmware: {len(checked_sizes)}/{len(STRUCT_SIZES)} struct sizes, "
           f"{checked_offsets}/{sum(len(v) for v in STRUCT_OFFSETS.values())} field offsets, "
           f"{len(hdr_checks)} header offsets, 4 constants, "
-          f"the msg_value_t bitfield layout, 4 round-trips")
+          f"the msg_value_t bitfield layout, the RS485 buffer mirror, 4 round-trips")
     if problems:
         print("\nSELF-TEST FAILED -- the Python layout table and the firmware disagree:")
         for p in problems:
