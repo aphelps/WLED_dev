@@ -34,7 +34,7 @@ self-contained after `git submodule update --init`.
 
 | Path | Repo | Role |
 |------|------|------|
-| `WLED/` | `aphelps/WLED` | The firmware itself (fork). Custom work branches from `base-wled-16.0.1`, not `main`. |
+| `WLED/` | `aphelps/WLED` | The firmware itself (fork). Custom work branches from `main`, which is the WLED 16.0.1 line (it was `base-wled-16.0.1` until 2026-07-30; the pre-v16 history is kept on `main-pre-v16`). |
 | `ArduinoLibs/` | `aphelps/ArduinoLibs` | Shared Arduino libraries — MPR121, Debug, `RS485Utils`/`Socket` (RS485 bus), and the vendored `RS485_non_blocking` (Nick Gammon, MIT). On the firmware build path via `lib_extra_dirs`. |
 | `HMTL/` | `aphelps/HMTL` | Legacy HMTL module firmware + Python tooling, **and the source of truth for the HMTL wire format**. `HMTL/Libraries` is on the firmware build path via `lib_extra_dirs` (`[env:ampworks]`), but only `HMTLprotocol` is ever compiled in: `rs485_bridge` imports `HMTLprotocol/HMTLWireFormat.h` — a dependency-free header (`<stdint.h>` + `Socket.h`, never `Arduino.h`) holding `msg_hdr_t`, the `MSG_TYPE_*`/`MSG_FLAG_*` codes, the `msg_*` payload structs, `output_hdr_t`, `config_hdr_t` and the `HMTL_OUTPUT_*`/`HMTL_PROGRAM_*` codes. Nothing includes `HMTLTypes.h` or `HMTLMessaging.h`: their sources pull FastLED/`PixelUtil`, `EEPromUtils`, `MPR121` and `XBeeSocket`, which WLED 16 cannot build. There is no second copy of the wire format to keep in sync. |
 | `esp-now-router/` | `aphelps/esp-now-router` | ESP-NOW multi-hop relay + leader election (added on `main` 2026-07-29, `7916e67`). Host tests run via the top-level `make test-router`; see `esp-now-router/tests/`. Not on the firmware build path. |
