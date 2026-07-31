@@ -122,12 +122,23 @@ class TestBody(unittest.TestCase):
     def test_no_phase_omits_timebase(self):
         self.assertNotIn("tb", ws.build_body(fx=1, timebase=None))
 
-    def test_effect_change_loads_its_own_defaults(self):
-        # setMode only reloads sx/ix under loadDefaults (FX_fcn.cpp:600-611). Without fxdef the
-        # fleet runs one effect at whatever speed each device happened to have.
-        self.assertTrue(ws.build_body(fx=7)["seg"]["fxdef"])
-        self.assertNotIn("fxdef", ws.build_body(pal=2).get("seg", {}),
-                         "fxdef is meaningless without an effect change")
+    def test_fxdef_is_never_sent(self):
+        # Regression. fxdef looks like the tidy way to equalise sx/ix, but setMode(fx, true) also
+        # resets map1D2D unguarded for effects not declaring m12= — WLED's own call site warns
+        # "may change map1D2D causing geometry change" (json.cpp:291) — and applies the effect's
+        # default palette (FX_fcn.cpp:616-617), silently overriding colour. It would wreck a
+        # matrix's expansion mode, unrecoverably by re-running.
+        for kwargs in ({"fx": 7}, {"fx": 7, "pal": 2}, {"fx": 7, "speed": 100}):
+            self.assertNotIn("fxdef", ws.build_body(**kwargs).get("seg", {}),
+                             f"fxdef must never be sent ({kwargs})")
+
+    def test_speed_and_intensity_sent_only_when_asked(self):
+        # Not normalised by default: speed is often deliberately per-installation.
+        seg = ws.build_body(fx=7).get("seg", {})
+        self.assertNotIn("sx", seg)
+        self.assertNotIn("ix", seg)
+        seg = ws.build_body(fx=7, speed=120, intensity=30)["seg"]
+        self.assertEqual((seg["sx"], seg["ix"]), (120, 30))
 
     def test_segment_carries_no_id(self):
         # No 'id' => applies to every selected segment; never assume segment 0 is main.
@@ -140,6 +151,29 @@ class TestBody(unittest.TestCase):
         self.assertEqual(body["seg"]["fx"], 1)
         self.assertEqual(body["seg"]["pal"], 2)
         self.assertEqual(body["seg"]["col"], [[255, 0, 0]])
+
+
+class TestExitRule(unittest.TestCase):
+    """The exit code must reflect whether devices actually got the look."""
+
+    @staticmethod
+    def _code(statuses):
+        rows = [{"status": st} for st in statuses]
+        ok = [r for r in rows if r["status"] in ("applied", "would apply")]
+        return 0 if len(ok) == len(rows) and rows else 1
+
+    def test_all_applied_is_success(self):
+        self.assertEqual(self._code(["applied", "applied"]), 0)
+        self.assertEqual(self._code(["would apply"]), 0)
+
+    def test_skipped_or_unreachable_is_failure(self):
+        # These used to exit 0: a run where every device was skipped is a failed sync.
+        for st in ("skipped", "unreachable", "failed", "mismatch"):
+            self.assertEqual(self._code(["applied", st]), 1, st)
+            self.assertEqual(self._code([st]), 1, st)
+
+    def test_no_devices_is_failure(self):
+        self.assertEqual(self._code([]), 1)
 
 
 class TestColour(unittest.TestCase):

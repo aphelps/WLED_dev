@@ -53,7 +53,8 @@ RESERVED_EFFECT_NAME = "RSVD"
 # (FX_fcn.cpp:1166-1170), NOT from the names — the names mislead in both directions:
 #
 #   "Default" (0)       LOOKS gradient-ish, but color_from_palette short-circuits to the segment
-#                       colour, so --color is at its MOST effective here.
+#                       colour (for call sites passing mcol < NUM_COLORS, which is most of them —
+#                       a minority pass 255 and fall through to the gradient default).
 #   "* Random Cycle"(1) LOOKS colour-driven because of the '*' decoration the colour palettes
 #                       share, but it uses _randomPalette and never reads colors[] at all.
 #
@@ -136,9 +137,10 @@ def parse_colour(text):
 def colour_is_moot(palette_name):
     """True when the chosen palette means most effects will ignore col[0].
 
-    Under palette 0 ('Default') or any gradient palette the effect takes its colours from the
-    palette, so --color has no visible result. Silently doing nothing reads as a tool bug, so
-    callers warn instead.
+    Consult COLOUR_DRIVEN_PALETTES, which is derived from WLED's palette switch rather than from
+    the names — the names mislead in both directions (see the constant). Note palette 0 'Default'
+    is colour-driven only for call sites passing mcol < NUM_COLORS; a minority of effects pass 255
+    and fall through to the gradient default, so this is a good heuristic, not a guarantee.
     """
     n = normalise(palette_name)
     if not n:
@@ -160,7 +162,7 @@ def make_timebase(now_ms=None):
 
 
 def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose=True,
-               load_defaults=True):
+               speed=None, intensity=None):
     """Assemble the POST body.
 
     Every field here is load-bearing:
@@ -173,16 +175,26 @@ def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose
       v     — makes WLED reply with the full serialized state instead of {"success":true}, so
               apply and verify are one round trip with no window for another writer.
       seg   — no 'id': applies to every selected segment, rather than assuming segment 0 is main.
-      fxdef — load the effect's OWN default speed/intensity. Without it `setMode` leaves sx/ix
-              untouched (`FX_fcn.cpp:600-611` only reloads them under loadDefaults), so devices
-              keep whatever speed they had and run the same effect at different rates — the very
-              divergence `tb` exists to prevent, arriving through another door.
+      sx/ix — sent only when asked for. Speed and intensity are frequently tuned per
+              installation, so they are NOT normalised by default; without them a shared effect
+              can still run at different rates, which --speed/--intensity exist to fix.
+
+    `fxdef` is deliberately NOT sent. It looks like the tidy way to equalise sx/ix, but
+    `setMode(fx, true)` also resets custom1-3, check1-3, soundSim, reverse, mirror, the effect's
+    default PALETTE (`FX_fcn.cpp:616-617`, overriding colour when --palette was not given) and —
+    worst — `map1D2D`, which is reset unguarded for any effect not declaring `m12=`. WLED's own
+    call site warns about it: "may change map1D2D causing geometry change" (`json.cpp:291`). That
+    destroys a matrix's expansion mode and is not undone by re-running. It would also not have
+    worked: both call sites gate on `fx != mode`, so a device already on the target effect keeps
+    its drifted speed anyway.
     """
     seg = {}
     if fx is not None:
         seg["fx"] = fx
-        if load_defaults:
-            seg["fxdef"] = True
+    if speed is not None:
+        seg["sx"] = speed
+    if intensity is not None:
+        seg["ix"] = intensity
     if pal is not None:
         seg["pal"] = pal
     if col is not None:
@@ -203,8 +215,12 @@ def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose
 def verify_applied(state, fx=None, pal=None, col=None):
     """Check a returned /json/state actually holds what we asked for. Returns list of mismatches.
 
-    Necessary because a 200 does not mean applied: 'pal' is silently ignored for non-RGB segments,
-    for one.
+    Necessary because a 200 does not mean applied — WLED accepts and then drops things.
+
+    Two cases are deliberately NOT reported as mismatches, because they are correct behaviour
+    rather than failure: a device with no selected segment (nothing was written at all), and
+    non-RGB segments, where WLED skips `pal` and forces `col` to white. Flagging those would
+    pin the exit code to 1 permanently on hardware that is working fine.
     """
     problems = []
     segs = (state or {}).get("seg") or []
@@ -313,7 +329,8 @@ def sync_one(scan, dev, args, timebase, timeout):
         return row
 
     body = build_body(fx=fx, pal=pal, col=col, timebase=timebase,
-                      turn_on=True, verbose=True)
+                      turn_on=True, verbose=True,
+                      speed=args.speed, intensity=args.intensity)
     resp, err = post_json(host, "/json/state", body, timeout)
     if err:
         row["status"] = "failed"
@@ -335,6 +352,11 @@ def main():
     ap.add_argument("--effect", help="effect name, e.g. 'Hiphotic' (matched case-insensitively)")
     ap.add_argument("--palette", help="palette name, e.g. 'Random Cycle'")
     ap.add_argument("--color", "--colour", dest="color", help="#RRGGBB or r,g,b")
+    ap.add_argument("--speed", type=int, metavar="0-255",
+                    help="effect speed (sx). Not set by default: speed is often tuned per "
+                         "installation, but a shared effect runs at different rates without it")
+    ap.add_argument("--intensity", type=int, metavar="0-255",
+                    help="effect intensity (ix); same reasoning as --speed")
     ap.add_argument("--dry-run", action="store_true", help="resolve and print; change nothing")
     ap.add_argument("--no-phase", action="store_true",
                     help="do not align animation phase (devices will visibly drift apart)")
@@ -343,7 +365,8 @@ def main():
     ap.add_argument("--subnet", action="append", default=[], metavar="CIDR",
                     help="explicit range to sweep instead of the local subnet (repeatable)")
     ap.add_argument("--host", action="append", default=[], metavar="HOST",
-                    help="target a specific host, skipping discovery (repeatable)")
+                    help="target a specific host instead of sweeping a subnet; still probed, "
+                         "under --discovery-timeout (repeatable)")
     ap.add_argument("--timeout", type=float, default=2.0,
                     help="per-request seconds for reads and writes (default 2.0)")
     ap.add_argument("--discovery-timeout", type=float, default=1.0,
