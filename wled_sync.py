@@ -37,9 +37,11 @@ import urllib.request
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 SCAN_PATH = os.path.join(REPO_ROOT, "skills", "wled-scan", "wled-scan.py")
 
-# Palette ID bases (WLED/wled00/const.h). Only the fixed block is addressed by list position.
+# Palette ID base for usermod palettes (WLED/wled00/const.h). Only the fixed block is addressed by
+# list position; usermod palettes count down from here.
+# Custom palettes (base 200) are deliberately absent: WLED exposes no names for them, so they
+# cannot be selected by name at all.
 USERMOD_PALETTE_ID_BASE = 255
-CUSTOM_PALETTE_ID_BASE = 200
 
 # The reserved-slot placeholder in /json/eff. The only duplicated name in either table, and never
 # a legitimate target — WLED uses it to keep effect indices stable across gaps.
@@ -338,10 +340,19 @@ def main():
                     help="do not align animation phase (devices will visibly drift apart)")
     ap.add_argument("--tailscale", action="store_true",
                     help="also scan Tailscale peers (off by default: different trust boundary)")
-    ap.add_argument("--subnet", action="append", default=[], metavar="CIDR")
-    ap.add_argument("--host", action="append", default=[], metavar="HOST")
-    ap.add_argument("--timeout", type=float, default=2.0)
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--subnet", action="append", default=[], metavar="CIDR",
+                    help="explicit range to sweep instead of the local subnet (repeatable)")
+    ap.add_argument("--host", action="append", default=[], metavar="HOST",
+                    help="target a specific host, skipping discovery (repeatable)")
+    ap.add_argument("--timeout", type=float, default=2.0,
+                    help="per-request seconds for reads and writes (default 2.0)")
+    ap.add_argument("--discovery-timeout", type=float, default=1.0,
+                    help="per-probe seconds while sweeping; kept short because most addresses "
+                         "are empty (default 1.0)")
+    ap.add_argument("--workers", type=int, default=16,
+                    help="concurrent devices to apply to (default 16)")
+    ap.add_argument("--discovery-workers", type=int, default=64,
+                    help="concurrent probes while sweeping (default 64)")
     args = ap.parse_args()
 
     if not (args.effect or args.palette or args.color):
@@ -375,8 +386,8 @@ def main():
 
     print(f"Scanning {len(ordered)} address(es)…", file=sys.stderr)
     devices = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
-        for info in ex.map(lambda h: scan.probe(h, 1.0), ordered):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.discovery_workers) as ex:
+        for info in ex.map(lambda h: scan.probe(h, args.discovery_timeout), ordered):
             if info:
                 devices.append(info)
     if not devices:

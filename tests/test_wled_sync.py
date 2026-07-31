@@ -214,6 +214,7 @@ class TestVerify(unittest.TestCase):
 # --- cross-version integration against stub servers --------------------------------------------
 class _Stub(BaseHTTPRequestHandler):
     tables = {}
+    posts = None          # list; appended to on any POST so a write cannot pass unnoticed
 
     def do_GET(self):
         body = self.tables.get(self.path)
@@ -226,12 +227,22 @@ class _Stub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def do_POST(self):
+        # Record rather than 501. A 501 would be swallowed by post_json into a quiet "failed" row,
+        # so the dry-run test would pass even if it HAD written.
+        if self.posts is not None:
+            self.posts.append(self.path)
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
     def log_message(self, *a):
         pass
 
 
-def _serve(tables):
-    handler = type("H", (_Stub,), {"tables": tables})
+def _serve(tables, posts=None):
+    handler = type("H", (_Stub,), {"tables": tables, "posts": posts})
     srv = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
@@ -291,16 +302,27 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
             srv.server_close()
 
     def test_dry_run_writes_nothing(self):
-        # The stub has no POST handler at all, so any write attempt would fail loudly.
-        scan = ws.load_scanner()
-        host = f"127.0.0.1:{self.s16.server_port}"
-        dev = scan.probe(host, 2.0)
+        # The stub ACCEPTS POSTs and records them, so a stray write is caught. (Returning 501
+        # instead would be swallowed by post_json into a quiet "failed" row and this would pass
+        # even if it had written.)
+        posts = []
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "dry", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10}},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED}, posts=posts)
+        try:
+            scan = ws.load_scanner()
+            host = f"127.0.0.1:{srv.server_port}"
+            dev = scan.probe(host, 2.0)
 
-        class A:
-            effect, palette, color, dry_run = "Hiphotic", "Party", None, True
-        row = ws.sync_one(scan, dev, A(), 12345, 2.0)
-        self.assertEqual(row["status"], "would apply")
-        self.assertIn("fx=", row["detail"])
+            class A:
+                effect, palette, color, dry_run = "Hiphotic", "Party", None, True
+            row = ws.sync_one(scan, dev, A(), 12345, 2.0)
+            self.assertEqual(row["status"], "would apply")
+            self.assertIn("fx=", row["detail"])
+            self.assertEqual(posts, [], "--dry-run must not POST anything")
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
 
 if __name__ == "__main__":
