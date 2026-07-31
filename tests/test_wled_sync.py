@@ -122,6 +122,13 @@ class TestBody(unittest.TestCase):
     def test_no_phase_omits_timebase(self):
         self.assertNotIn("tb", ws.build_body(fx=1, timebase=None))
 
+    def test_effect_change_loads_its_own_defaults(self):
+        # setMode only reloads sx/ix under loadDefaults (FX_fcn.cpp:600-611). Without fxdef the
+        # fleet runs one effect at whatever speed each device happened to have.
+        self.assertTrue(ws.build_body(fx=7)["seg"]["fxdef"])
+        self.assertNotIn("fxdef", ws.build_body(pal=2).get("seg", {}),
+                         "fxdef is meaningless without an effect change")
+
     def test_segment_carries_no_id(self):
         # No 'id' => applies to every selected segment; never assume segment 0 is main.
         body = ws.build_body(fx=1, pal=2)
@@ -147,12 +154,23 @@ class TestColour(unittest.TestCase):
             self.assertIsNone(rgb, f"{bad!r} should not parse")
             self.assertIsNotNone(err)
 
-    def test_moot_detection(self):
-        # Gradient/default palettes drive colour themselves; --color would do nothing visible.
-        self.assertTrue(ws.colour_is_moot("Default"))
+    def test_moot_detection_follows_the_code_not_the_names(self):
+        # These two are the ones the names get wrong, and an earlier version had both backwards.
+        # Palette 0 "Default" short-circuits to the segment colour (FX_fcn.cpp:1168-1170), so
+        # --color is MOST effective there.
+        self.assertFalse(ws.colour_is_moot("Default"))
+        # "* Random Cycle" wears the same '*' as the colour palettes but uses _randomPalette and
+        # never reads colors[] (FX_fcn.cpp:248-249), so --color does nothing.
+        self.assertTrue(ws.colour_is_moot("Random Cycle"))
+        self.assertTrue(ws.colour_is_moot("* Random Cycle"))
+
+        # Palettes 2-5 build their palette from colors[0..2].
+        for name in ("* Color 1", "Color 1", "Colors 1&2", "Color Gradient", "Colors Only"):
+            self.assertFalse(ws.colour_is_moot(name), f"{name} is colour-driven")
+
+        # A genuine gradient palette ignores col.
         self.assertTrue(ws.colour_is_moot("Party"))
-        self.assertFalse(ws.colour_is_moot("* Color 1"))
-        self.assertFalse(ws.colour_is_moot("Random Cycle"))
+        self.assertTrue(ws.colour_is_moot("Cloud"))
 
 
 class TestVerify(unittest.TestCase):
@@ -169,6 +187,28 @@ class TestVerify(unittest.TestCase):
 
     def test_no_segments_is_a_problem(self):
         self.assertTrue(ws.verify_applied({"seg": []}, fx=1))
+
+    def test_unselected_segments_report_the_real_reason(self):
+        # A seg body with no id only touches SELECTED segments (json.cpp:470-474). If none are
+        # selected, nothing was written — that must not surface as "wrong effect applied".
+        state = {"seg": [{"id": 0, "sel": False, "fx": 99}]}
+        problems = ws.verify_applied(state, fx=1)
+        self.assertTrue(any("selected" in p for p in problems), problems)
+        self.assertFalse(any("fx=" in p for p in problems), "should not claim a wrong effect")
+
+    def test_non_rgb_segment_does_not_false_fail(self):
+        # WLED skips pal and forces col to white on non-RGB segments (lc bit 0 = RGB), so checking
+        # them there would pin the exit code to 1 forever.
+        state = {"seg": [{"id": 0, "sel": True, "lc": 0, "fx": 5, "pal": 0,
+                          "col": [[255, 255, 255]]}]}
+        self.assertFalse(ws.verify_applied(state, fx=5, pal=3, col=[255, 0, 0]))
+        # ...but a wrong effect is still caught there.
+        self.assertTrue(ws.verify_applied(state, fx=9))
+
+    def test_rgbw_four_channel_colour_does_not_false_fail(self):
+        state = {"seg": [{"id": 0, "sel": True, "lc": 3, "fx": 5,
+                          "col": [[255, 0, 0, 0]]}]}
+        self.assertFalse(ws.verify_applied(state, fx=5, col=[255, 0, 0]))
 
 
 # --- cross-version integration against stub servers --------------------------------------------

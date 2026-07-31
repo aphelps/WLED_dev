@@ -45,10 +45,23 @@ CUSTOM_PALETTE_ID_BASE = 200
 # a legitimate target — WLED uses it to keep effect indices stable across gaps.
 RESERVED_EFFECT_NAME = "RSVD"
 
-# Palettes whose output comes from the segment colours rather than a gradient. --color is only
-# meaningful under one of these; everything else ignores col entirely for most effects.
+# Palettes whose output comes from the segment colours, so --color is visible under them.
+#
+# Determined from WLED's palette switch (FX_fcn.cpp:244-280) and color_from_palette
+# (FX_fcn.cpp:1166-1170), NOT from the names — the names mislead in both directions:
+#
+#   "Default" (0)       LOOKS gradient-ish, but color_from_palette short-circuits to the segment
+#                       colour, so --color is at its MOST effective here.
+#   "* Random Cycle"(1) LOOKS colour-driven because of the '*' decoration the colour palettes
+#                       share, but it uses _randomPalette and never reads colors[] at all.
+#
+# Palettes 2-5 build their CRGBPalette16 straight from colors[0..2].
 COLOUR_DRIVEN_PALETTES = {
-    "color 1", "colors 1&2", "color gradient", "colors only", "random cycle",
+    "default",          # 0 — color_from_palette returns getCurrentColor(mcol)
+    "color 1",          # 2 — CRGBPalette16(colors[0])
+    "colors 1&2",       # 3
+    "color gradient",   # 4
+    "colors only",      # 5
 }
 
 
@@ -144,7 +157,8 @@ def make_timebase(now_ms=None):
     return ms & TB_MAX
 
 
-def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose=True):
+def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose=True,
+               load_defaults=True):
     """Assemble the POST body.
 
     Every field here is load-bearing:
@@ -157,10 +171,16 @@ def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose
       v     — makes WLED reply with the full serialized state instead of {"success":true}, so
               apply and verify are one round trip with no window for another writer.
       seg   — no 'id': applies to every selected segment, rather than assuming segment 0 is main.
+      fxdef — load the effect's OWN default speed/intensity. Without it `setMode` leaves sx/ix
+              untouched (`FX_fcn.cpp:600-611` only reloads them under loadDefaults), so devices
+              keep whatever speed they had and run the same effect at different rates — the very
+              divergence `tb` exists to prevent, arriving through another door.
     """
     seg = {}
     if fx is not None:
         seg["fx"] = fx
+        if load_defaults:
+            seg["fxdef"] = True
     if pal is not None:
         seg["pal"] = pal
     if col is not None:
@@ -188,13 +208,22 @@ def verify_applied(state, fx=None, pal=None, col=None):
     segs = (state or {}).get("seg") or []
     if not segs:
         return ["device reported no segments"]
-    applied = [s for s in segs if s.get("sel", True)] or segs
+    # `sel` is serialized (json.cpp:627). A seg body without an id only touches SELECTED segments
+    # (json.cpp:470-474), so if none are selected nothing was written — say that, rather than
+    # falling back to every segment and reporting a phantom "wrong effect".
+    applied = [s for s in segs if s.get("sel", True)]
+    if not applied:
+        return ["no segment is selected on this device, so nothing was applied"]
     for s in applied:
+        # lc (json.cpp:597) is the segment's light capabilities; bit 0 = RGB. WLED skips `pal` and
+        # forces `col` to white on non-RGB segments, so checking them there is a guaranteed false
+        # mismatch that would pin the exit code to 1 forever.
+        is_rgb = bool(s.get("lc", 1) & 1)
         if fx is not None and s.get("fx") != fx:
             problems.append(f"seg{s.get('id')} fx={s.get('fx')} (wanted {fx})")
-        if pal is not None and s.get("pal") != pal:
+        if pal is not None and is_rgb and s.get("pal") != pal:
             problems.append(f"seg{s.get('id')} pal={s.get('pal')} (wanted {pal})")
-        if col is not None:
+        if col is not None and is_rgb:
             got = (s.get("col") or [[None]])[0]
             if list(got)[:3] != list(col)[:3]:
                 problems.append(f"seg{s.get('id')} col={got} (wanted {list(col)})")
@@ -359,9 +388,16 @@ def main():
 
     rows = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(sync_one, scan, d, args, timebase, args.timeout) for d in devices]
+        futs = {ex.submit(sync_one, scan, d, args, timebase, args.timeout): d for d in devices}
         for f in concurrent.futures.as_completed(futs):
-            rows.append(f.result())
+            dev = futs[f]
+            try:
+                rows.append(f.result())
+            except Exception as e:                      # noqa: BLE001 — one bad device must not
+                # lose the other rows. urlopen does not wrap every failure (http.client
+                # exceptions escape it), so this is reachable, not defensive padding.
+                rows.append({"name": dev.get("name") or dev["_host"], "host": dev["_host"],
+                             "status": "failed", "detail": f"{type(e).__name__}: {e}"})
 
     widths = {k: max(len(k.upper()), max((len(str(r[k])) for r in rows), default=0))
               for k in ("name", "host", "status", "detail")}
@@ -371,8 +407,10 @@ def main():
     for r in sorted(rows, key=lambda x: x["name"].lower()):
         print("  ".join(str(r[k]).ljust(widths[k]) for k in order))
 
-    bad = [r for r in rows if r["status"] in ("failed", "mismatch")]
-    return 1 if bad else 0
+    # Non-zero if ANY device did not end up with the requested look — skipped and unreachable
+    # count too. A run where every device was skipped is a failed sync, not a success.
+    ok = [r for r in rows if r["status"] in ("applied", "would apply")]
+    return 0 if len(ok) == len(rows) and rows else 1
 
 
 if __name__ == "__main__":
