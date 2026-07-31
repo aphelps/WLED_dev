@@ -97,6 +97,28 @@ class TestBody(unittest.TestCase):
         self.assertIs(body["on"], True)
         self.assertIs(body["v"], True)
 
+    def test_timebase_survives_wled_signed_32bit_parse(self):
+        # Regression. WLED reads tb into `long tr` (json.cpp:398) and ignores it unless tr >= 0
+        # (json.cpp:417-418); `long` is 32-bit signed on ESP32. An unmasked millisecond epoch
+        # exceeds INT32_MAX, so tb would be dropped and phase alignment would silently no-op.
+        # The failure is INTERMITTENT, which is what makes it nasty: bit 31 of epoch-ms flips
+        # about every 24.8 days, so an unmasked value is fine for ~25 days, silently broken for
+        # ~25 days, then fine again. Construct the bad half explicitly rather than trusting "now".
+        INT32_MAX = 2**31 - 1
+        raw = 0x1C0000000                       # low 32 bits = 0xC0000000, i.e. bit 31 set
+        self.assertGreater(raw & 0xFFFFFFFF, INT32_MAX, "test must exercise the overflow case")
+        tb = ws.make_timebase(raw)
+        self.assertGreaterEqual(tb, 0)
+        self.assertLessEqual(tb, INT32_MAX, "tb must fit a positive signed 32-bit long")
+        # and what actually goes on the wire is bounded too
+        self.assertLessEqual(ws.build_body(fx=1, timebase=ws.make_timebase())["tb"], INT32_MAX)
+
+    def test_timebase_is_shared_not_per_device(self):
+        # Alignment depends on every device receiving the SAME anchor.
+        tb = ws.make_timebase()
+        bodies = [ws.build_body(fx=1, timebase=tb) for _ in range(3)]
+        self.assertEqual(len({b["tb"] for b in bodies}), 1)
+
     def test_no_phase_omits_timebase(self):
         self.assertNotIn("tb", ws.build_body(fx=1, timebase=None))
 

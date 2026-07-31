@@ -131,6 +131,19 @@ def colour_is_moot(palette_name):
     return n not in COLOUR_DRIVEN_PALETTES
 
 
+# WLED parses `tb` into `long tr` (json.cpp:398) and ignores it unless `tr >= 0` (json.cpp:417-418).
+# `long` is 32-bit signed on ESP32, so a value above INT32_MAX does not survive the round trip and
+# phase alignment silently does nothing. Mask to 31 bits to stay positive. The absolute value is
+# arbitrary — `strip.timebase = tb - millis()` means only *agreement* between devices matters.
+TB_MAX = 0x7FFFFFFF
+
+
+def make_timebase(now_ms=None):
+    """A shared phase anchor that survives WLED's signed 32-bit parse."""
+    ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    return ms & TB_MAX
+
+
 def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose=True):
     """Assemble the POST body.
 
@@ -342,7 +355,7 @@ def main():
         return 1
 
     # One timebase for the whole run, so every device anchors to the same instant.
-    timebase = None if args.no_phase else int(time.time() * 1000) & 0xFFFFFFFF
+    timebase = None if args.no_phase else make_timebase()
 
     rows = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
