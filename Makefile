@@ -15,9 +15,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-sync test-ui test-all clean
 
-test: test-wled test-bridge test-libs test-hmtl test-router
+test: test-wled test-bridge test-libs test-hmtl test-router test-sync
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -150,6 +150,16 @@ test-router:
 	  $(call missing_tests,no tests/ at the pinned esp-now-router revision); \
 	else \
 	  $(MAKE) --no-print-directory -C esp-now-router/tests test; \
+	fi
+
+# Fleet sync tool (top-level, not a submodule): name resolution, request-body construction and a
+# cross-version check against local stub servers. Pure Python, no hardware, no submodule needed.
+test-sync:
+	@echo "== wled_sync host tests =="
+	@if [ ! -f tests/test_wled_sync.py ]; then \
+	  $(call missing_tests,no tests/test_wled_sync.py); \
+	else \
+	  python3 tests/test_wled_sync.py; \
 	fi
 
 # WLED web-UI builder test (Node/npm).
