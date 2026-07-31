@@ -253,6 +253,9 @@ class TestVerify(unittest.TestCase):
 
 
 # --- cross-version integration against stub servers --------------------------------------------
+bodies = []          # raw POST bodies seen by any stub, for assertions on what went on the wire
+
+
 class _Stub(BaseHTTPRequestHandler):
     tables = {}
     posts = None          # list; appended to on any POST so a write cannot pass unnoticed
@@ -273,6 +276,8 @@ class _Stub(BaseHTTPRequestHandler):
         # so the dry-run test would pass even if it HAD written.
         if self.posts is not None:
             self.posts.append(self.path)
+            n = int(self.headers.get("Content-Length") or 0)
+            bodies.append(self.rfile.read(n).decode() if n else "{}")
         self.send_response(200)
         self.send_header("Content-Length", "2")
         self.end_headers()
@@ -339,6 +344,33 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
             row = ws.sync_one(scan, dev, A(), None, 2.0)
             self.assertEqual(row["status"], "skipped")
             self.assertIn("indices unsafe", row["detail"])
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_apply_forwards_speed_and_intensity(self):
+        # The line forwarding args.speed into build_body had no coverage at all: every existing
+        # test used dry_run=True and returned before reaching it. This also makes the stubs'
+        # `speed`/`intensity` attributes load-bearing rather than decorative.
+        posts = []
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "apply", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10}},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED}, posts=posts)
+        try:
+            scan = ws.load_scanner()
+            host = f"127.0.0.1:{srv.server_port}"
+            dev = scan.probe(host, 2.0)
+
+            class A:
+                effect, palette, color, dry_run = "Hiphotic", None, None, False
+                speed, intensity = 120, 30
+            ws.sync_one(scan, dev, A(), 4242, 2.0)
+            self.assertEqual(posts, ["/json/state"], "apply path must POST exactly once")
+            body = json.loads(bodies[-1])
+            self.assertEqual(body["seg"]["sx"], 120)
+            self.assertEqual(body["seg"]["ix"], 30)
+            self.assertEqual(body["tb"], 4242)
+            self.assertTrue(body["udpn"]["nn"])
         finally:
             srv.shutdown()
             srv.server_close()

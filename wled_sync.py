@@ -19,6 +19,7 @@ The interesting parts are not the HTTP calls:
 Usage:
   wled_sync.py --effect Hiphotic
   wled_sync.py --effect Blink --palette "Random Cycle" --color '#FF0000'
+  wled_sync.py --effect Hiphotic --speed 128 --intensity 200
   wled_sync.py --effect Hiphotic --dry-run
   wled_sync.py --effect Hiphotic --tailscale        # include Tailscale peers (off by default)
 """
@@ -229,8 +230,9 @@ def verify_applied(state, fx=None, pal=None, col=None):
 
     Two distinct cases, handled differently:
 
-      * non-RGB segments are EXEMPT — WLED skips `pal` and forces `col` to white there, so
-        checking them would pin the exit code to 1 forever on hardware that is working fine.
+      * on non-RGB segments only `pal` and `col` are exempt — WLED skips the former and forces
+        the latter to white, so checking them would pin the exit code to 1 forever on hardware
+        that is working fine. `fx` is still verified there, because it does apply.
       * a device with no selected segment IS reported, but with the real reason ("nothing was
         applied") rather than a misleading "wrong effect", since nothing was written at all.
     """
@@ -335,9 +337,9 @@ def sync_one(scan, dev, args, timebase, timeout):
     if col is not None:
         resolved.append(f"col={col}")
     # sx/ix belong here too, or --dry-run is blind to the one knob nothing downstream verifies.
-    if getattr(args, "speed", None) is not None:
+    if args.speed is not None:
         resolved.append(f"sx={args.speed}")
-    if getattr(args, "intensity", None) is not None:
+    if args.intensity is not None:
         resolved.append(f"ix={args.intensity}")
     row["detail"] = " ".join(resolved)
 
@@ -406,8 +408,8 @@ def main():
     # it. Reject here instead.
     for flag, val in (("--speed", args.speed), ("--intensity", args.intensity)):
         if val is not None and not (0 <= val <= 255):
-            ap.error(f"{flag} must be 0-255 (got {val}); WLED zeroes out-of-range values rather "
-                     f"than clamping them, which would freeze the fleet")
+            ap.error(f"{flag} must be 0-255 (got {val}); WLED does not clamp — a value above 255 "
+                     f"becomes 0 (freezing the fleet), and a negative one is ignored entirely")
 
     if args.color and args.palette and colour_is_moot(args.palette):
         print(f"WARNING: palette {args.palette!r} supplies its own colours; most effects will "
