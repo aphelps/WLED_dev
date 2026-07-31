@@ -22,7 +22,19 @@ static const char _data_FX_MODE_MY_EFFECT[] PROGMEM =
 ## PROGMEM descriptor format
 `"Name@p1,p2,p3;c1,c2,c3;pal;flags;defaults"`
 - params/colors/pal: omit trailing defaults; use `!` for "automatic"
-- flags: `01` = 1D; `02` = 2D; `08` = volume reactive; `10` = freq reactive
+- flags: a string of **characters**, not a hex bitmask — the UI tests each one with
+  `includes()` (`wled00/data/index.js`), so they combine by concatenation:
+
+  | Char | Meaning |
+  |---|---|
+  | `0` | 0D (PWM / on-off) |
+  | `1` | 1D |
+  | `2` | 2D |
+  | `v` | volume reactive |
+  | `f` | frequency reactive |
+
+  So `01` is "0D and 1D", **not** hex `0x01`. Real examples from `FX.cpp`:
+  `"Blink@!,Duty cycle;!,!;!;01"` and `"GEQ@…;!,,Peaks;!;2f;…"` (2D + frequency reactive).
 - defaults: `sx=`,`ix=`,`c1=`,`c2=`,`c3=`,`pal=` (0–255)
 
 ## Registration (in `AMPWorks::setup()`)

@@ -80,7 +80,18 @@ curl -s http://192.168.1.55/json/info | python3 -m json.tool
 
 For custom build flags, create `WLED/platformio_override.ini` (see `platformio_override.sample.ini`).
 
-After cloning or adding a new project-level skill, run `skills/install.sh` to create symlinks into `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex).
+### Skills
+
+Project skills live in `skills/` (see `skills/README.md`). Run `skills/install.sh` to symlink them
+into `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex). Those two directories are
+gitignored and per-checkout, so the links do not travel with the repo.
+
+Run it:
+- after cloning,
+- after adding or renaming a skill,
+- **after any pull/submodule refresh that brings in new or renamed skills** — they will not load
+  until they are linked, and a renamed one leaves a dangling link behind. The script is idempotent
+  and repairs broken or stale links, so re-running it is always safe (`--dry-run` to preview).
 
 ## Running Tests
 

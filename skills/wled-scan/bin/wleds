@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# wleds — list every WLED device reachable on the LAN and Tailscale, with its configuration.
+#
+# Thin wrapper so the command name is short and stable while the implementation stays in the
+# skill. Resolves its own location, so it works through a symlink from anywhere on PATH.
+#
+#   wleds                      # LAN + Tailscale
+#   wleds --lan                # LAN only
+#   wleds --subnet 10.0.0.0/24 # explicit range
+#   wleds --json               # machine-readable
+#
+# See skills/wled-scan/SKILL.md for the full option list.
+
+set -euo pipefail
+
+# Follow symlinks to find the real script (readlink -f is not on stock macOS).
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" != /* ]] && src="$dir/$src"
+done
+here="$(cd -P "$(dirname "$src")" && pwd)"
+
+exec python3 "$here/../wled-scan.py" "$@"
