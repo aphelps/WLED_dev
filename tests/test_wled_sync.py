@@ -158,9 +158,9 @@ class TestExitRule(unittest.TestCase):
 
     @staticmethod
     def _code(statuses):
-        rows = [{"status": st} for st in statuses]
-        ok = [r for r in rows if r["status"] in ("applied", "would apply")]
-        return 0 if len(ok) == len(rows) and rows else 1
+        # Calls the REAL rule. An earlier version re-implemented it here, which proved nothing —
+        # mutating main() left every test green.
+        return ws.exit_code([{"status": st} for st in statuses])
 
     def test_all_applied_is_success(self):
         self.assertEqual(self._code(["applied", "applied"]), 0)
@@ -174,6 +174,13 @@ class TestExitRule(unittest.TestCase):
 
     def test_no_devices_is_failure(self):
         self.assertEqual(self._code([]), 1)
+
+    def test_calls_the_shipped_rule_directly(self):
+        # Belt and braces on the vacuous-test failure mode: exercise ws.exit_code by name, so this
+        # cannot pass against a hand-copied rule in the test file.
+        self.assertEqual(ws.exit_code([{"status": "applied"}]), 0)
+        self.assertEqual(ws.exit_code([{"status": "skipped"}]), 1)
+        self.assertEqual(ws.exit_code([]), 1)
 
 
 class TestColour(unittest.TestCase):
@@ -328,6 +335,7 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
 
             class A:
                 effect, palette, color, dry_run = "Hiphotic", None, None, True
+                speed = intensity = None
             row = ws.sync_one(scan, dev, A(), None, 2.0)
             self.assertEqual(row["status"], "skipped")
             self.assertIn("indices unsafe", row["detail"])
@@ -350,6 +358,7 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
 
             class A:
                 effect, palette, color, dry_run = "Hiphotic", "Party", None, True
+                speed = intensity = None
             row = ws.sync_one(scan, dev, A(), 12345, 2.0)
             self.assertEqual(row["status"], "would apply")
             self.assertIn("fx=", row["detail"])

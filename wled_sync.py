@@ -212,15 +212,27 @@ def build_body(fx=None, pal=None, col=None, timebase=None, turn_on=True, verbose
     return body
 
 
+def exit_code(rows):
+    """0 only if every device ended up with the requested look.
+
+    Lives here rather than inline in main() so the tests exercise the real rule. A test that
+    re-implements it proves nothing: mutating main() would leave such a test green.
+    """
+    ok = [r for r in rows if r.get("status") in ("applied", "would apply")]
+    return 0 if rows and len(ok) == len(rows) else 1
+
+
 def verify_applied(state, fx=None, pal=None, col=None):
     """Check a returned /json/state actually holds what we asked for. Returns list of mismatches.
 
     Necessary because a 200 does not mean applied — WLED accepts and then drops things.
 
-    Two cases are deliberately NOT reported as mismatches, because they are correct behaviour
-    rather than failure: a device with no selected segment (nothing was written at all), and
-    non-RGB segments, where WLED skips `pal` and forces `col` to white. Flagging those would
-    pin the exit code to 1 permanently on hardware that is working fine.
+    Two distinct cases, handled differently:
+
+      * non-RGB segments are EXEMPT — WLED skips `pal` and forces `col` to white there, so
+        checking them would pin the exit code to 1 forever on hardware that is working fine.
+      * a device with no selected segment IS reported, but with the real reason ("nothing was
+        applied") rather than a misleading "wrong effect", since nothing was written at all.
     """
     problems = []
     segs = (state or {}).get("seg") or []
@@ -322,6 +334,11 @@ def sync_one(scan, dev, args, timebase, timeout):
         resolved.append(f"pal={pal}")
     if col is not None:
         resolved.append(f"col={col}")
+    # sx/ix belong here too, or --dry-run is blind to the one knob nothing downstream verifies.
+    if getattr(args, "speed", None) is not None:
+        resolved.append(f"sx={args.speed}")
+    if getattr(args, "intensity", None) is not None:
+        resolved.append(f"ix={args.intensity}")
     row["detail"] = " ".join(resolved)
 
     if args.dry_run:
@@ -378,8 +395,19 @@ def main():
                     help="concurrent probes while sweeping (default 64)")
     args = ap.parse_args()
 
-    if not (args.effect or args.palette or args.color):
-        ap.error("nothing to sync — give at least one of --effect / --palette / --color")
+    if not (args.effect or args.palette or args.color
+            or args.speed is not None or args.intensity is not None):
+        ap.error("nothing to sync — give at least one of "
+                 "--effect / --palette / --color / --speed / --intensity")
+
+    # Out-of-range is NOT clamped by WLED: getVal passes no bounds (json.cpp:294) and ArduinoJson's
+    # convertNumber returns 0 when the value will not fit a uint8_t. So `--speed 999` would set
+    # sx=0 on every device — a visible freeze on most effects — with nothing downstream to catch
+    # it. Reject here instead.
+    for flag, val in (("--speed", args.speed), ("--intensity", args.intensity)):
+        if val is not None and not (0 <= val <= 255):
+            ap.error(f"{flag} must be 0-255 (got {val}); WLED zeroes out-of-range values rather "
+                     f"than clamping them, which would freeze the fleet")
 
     if args.color and args.palette and colour_is_moot(args.palette):
         print(f"WARNING: palette {args.palette!r} supplies its own colours; most effects will "
@@ -441,10 +469,7 @@ def main():
     for r in sorted(rows, key=lambda x: x["name"].lower()):
         print("  ".join(str(r[k]).ljust(widths[k]) for k in order))
 
-    # Non-zero if ANY device did not end up with the requested look — skipped and unreachable
-    # count too. A run where every device was skipped is a failed sync, not a success.
-    ok = [r for r in rows if r["status"] in ("applied", "would apply")]
-    return 0 if len(ok) == len(rows) and rows else 1
+    return exit_code(rows)
 
 
 if __name__ == "__main__":
