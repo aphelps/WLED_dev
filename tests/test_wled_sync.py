@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-spec = importlib.util.spec_from_file_location("wled_sync", os.path.join(REPO_ROOT, "wled_sync.py"))
+spec = importlib.util.spec_from_file_location("wled_sync", os.path.join(REPO_ROOT, "scripts", "wled_sync.py"))
 ws = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ws)
 

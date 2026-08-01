@@ -17,11 +17,11 @@ The interesting parts are not the HTTP calls:
     palettes are 255-j, custom are 200-k. Position in /json/pal is only the ID for the fixed block.
 
 Usage:
-  wled_sync.py --effect Hiphotic
-  wled_sync.py --effect Blink --palette "Random Cycle" --color '#FF0000'
-  wled_sync.py --effect Hiphotic --speed 128 --intensity 200
-  wled_sync.py --effect Hiphotic --dry-run
-  wled_sync.py --effect Hiphotic --tailscale        # include Tailscale peers (off by default)
+  scripts/wled_sync.py --effect Hiphotic
+  scripts/wled_sync.py --effect Blink --palette "Random Cycle" --color '#FF0000'
+  scripts/wled_sync.py --effect Hiphotic --speed 128 --intensity 200
+  scripts/wled_sync.py --effect Hiphotic --dry-run
+  scripts/wled_sync.py --effect Hiphotic --tailscale        # include Tailscale peers (off by default)
 """
 
 import argparse
@@ -35,7 +35,8 @@ import time
 import urllib.error
 import urllib.request
 
-REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+# One level up: this lives in scripts/, the seam and the scanner are repo-relative.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCAN_PATH = os.path.join(REPO_ROOT, "skills", "wled-scan", "wled-scan.py")
 
 # Palette ID base for usermod palettes (WLED/wled00/const.h). Only the fixed block is addressed by
