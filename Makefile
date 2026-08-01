@@ -49,6 +49,12 @@ endef
 # which reads as a contradiction to whoever just typed OFF.
 STRICT ?=
 REQUIRE_TOOLCHAINS ?=
+# STRICT implies "at least one real embedded toolchain must have run" — see test-hmtl below.
+ifeq ($(filter-out 0 no No NO false False FALSE off Off OFF,$(strip $(STRICT))),)
+require_any_real :=
+else
+require_any_real := 1
+endif
 ifeq ($(filter-out 0 no No NO false False FALSE off Off OFF,$(strip $(STRICT))),)
 missing_tests = echo "-- skipped: $(1) --"
 else
@@ -115,13 +121,22 @@ test-libs:
 # Without REQUIRE_TOOLCHAINS the sweep runs whatever compilers exist and prints a COVERAGE line
 # naming what it skipped, so a host-only run cannot be read as a full one. On a runner with
 # avr-g++ and xtensa-esp32-elf-g++ installed, pass REQUIRE_TOOLCHAINS=1 to demand all four ABIs.
+#
+# STRICT=1 additionally sets REQUIRE_ANY_REAL, which is the weaker guarantee that matters most: it
+# does not demand a specific toolchain, only that the sweep touched at least ONE real embedded ABI.
+# Without it, `make test STRICT=1` on a runner with neither toolchain would compile the host pair,
+# report success, and have cross-checked no embedded ABI at all — the same "a skipped suite reports
+# green" failure the STRICT machinery above exists to prevent. Today's CI runner has xtensa (the
+# espressif32 platform install brings it), so this passes; only avr-g++ is missing.
 test-hmtl:
 	@echo "== HMTL cross-ABI wire layout sweep =="
 	$(call require_submodule,HMTL)
 	@if [ ! -f HMTL/tests/layout/Makefile ]; then \
 	  $(call missing_tests,no tests/layout/ at the pinned HMTL revision); \
 	else \
-	  $(MAKE) --no-print-directory -C HMTL/tests/layout REQUIRE_TOOLCHAINS=$(REQUIRE_TOOLCHAINS) && \
+	  $(MAKE) --no-print-directory -C HMTL/tests/layout \
+	    REQUIRE_TOOLCHAINS=$(REQUIRE_TOOLCHAINS) REQUIRE_ANY_REAL=$(require_any_real) && \
+	  $(MAKE) --no-print-directory -C HMTL/tests/layout packed-access && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout negative || exit 1; \
 	fi
 
