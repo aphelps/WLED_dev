@@ -113,6 +113,17 @@ test-router:
 	  $(MAKE) --no-print-directory -C esp-now-router/tests test; \
 	fi
 
+# AP auto-join tool: candidate selection, identity gating and the safety properties (never push to
+# an unidentified AP; always forget the AP we joined). Pure Python against a fake platform — no
+# radio is touched.
+test-apjoin:
+	@echo "== wled_apjoin host tests =="
+	@if [ ! -f tests/test_wled_apjoin.py ]; then \
+	  $(call missing_tests,no tests/test_wled_apjoin.py); \
+	else \
+	  python3 tests/test_wled_apjoin.py; \
+	fi
+
 # WLED web-UI builder test (Node/npm).
 test-ui:
 	@echo "== WLED web-UI builder test =="
