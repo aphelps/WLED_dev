@@ -57,7 +57,7 @@ def matches_pattern(ssid, patterns):
     return False
 
 
-def is_candidate(net, patterns, probe_open):
+def is_candidate(net, patterns, probe_open, exclude=()):
     """Should this scan result be tried? Returns (bool, reason).
 
     Three sources, because each misses what the others catch (see the plan):
@@ -71,11 +71,17 @@ def is_candidate(net, patterns, probe_open):
     ssid = net.get("ssid") or ""
     if not ssid:
         return False, "no ssid"
+    # Never touch our own networks. Without this a run joins the home network, fails to find a
+    # WLED device on it, and then FORGETS it — removing it from the preferred list on the way past.
+    if any(ssid.lower() == (e or "").lower() for e in exclude):
+        return False, "this is one of our own networks"
     if matches_pattern(ssid, patterns):
         return True, "name matches a WLED pattern"
     if probe_open and net.get("open"):
-        if net.get("band") == 5:
-            return False, "open but 5GHz — an ESP32 cannot be here"
+        # Require 2.4GHz positively. Testing `!= 5` fails OPEN when the band is missing or the
+        # channel was unknown (-1), which would let 5/6GHz strangers through.
+        if net.get("band") != 2:
+            return False, f"open but band={net.get('band')!r} — an ESP32 is 2.4GHz only"
         return True, "open 2.4GHz AP — may be a renamed device"
     return False, "no match"
 
@@ -185,13 +191,24 @@ class MacPlatform:
                        capture_output=True, text=True)
 
     def is_connected(self):
-        """Association is not enough — check we can actually route."""
+        """Back on a real network — NOT merely holding an address.
+
+        A WLED SoftAP hands out 4.3.2.x, so `ipconfig getifaddr` succeeds while we are still on the
+        device's AP. Treating that as success is how a run reports "back on home Wi-Fi", disarms the
+        watchdog, and exits 0 on a stranded host. Exclude the SoftAP subnet explicitly."""
         try:
             ip = subprocess.run(["ipconfig", "getifaddr", self.iface],
                                 capture_output=True, text=True, timeout=10)
         except (OSError, subprocess.SubprocessError):
             return False
-        return bool(ip.stdout.strip())
+        addr = (ip.stdout or "").strip()
+        if not addr:
+            return False
+        if addr.startswith("4.3.2."):
+            return False          # still on a WLED SoftAP
+        if addr.startswith("169.254."):
+            return False          # link-local: associated but no DHCP
+        return True
 
     def wait_online(self, deadline_s):
         end = time.time() + deadline_s
@@ -204,14 +221,32 @@ class MacPlatform:
     def watchdog(self, ssid, password, after_s):
         """Detached force-rejoin. Must outlive this process group: a terminal SIGINT reaches a
         plain background child, which is how the shell version could be left with nothing to
-        recover the host after a second Ctrl-C."""
-        cmd = ["networksetup", "-setairportnetwork", self.iface, ssid]
-        if password:
-            cmd.append(password)
-        script = f"sleep {int(after_s)}; " + " ".join(subprocess.list2cmdline([c]) for c in cmd)
-        return subprocess.Popen(["/bin/sh", "-c", script],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                start_new_session=True)
+        recover the host after a second Ctrl-C.
+
+        No shell, deliberately. An earlier version built a `/bin/sh -c` string with
+        subprocess.list2cmdline — which is the WINDOWS quoting rule — so an SSID or password
+        containing a space, quote, backtick or `$` was either corrupted or executed: `pa$$word`
+        became the shell's PID, `a;id` ran `id`, and `p'w` killed the watchdog at launch with an
+        unexpected-EOF while `dog` still looked alive. It also put the network PSK into a
+        ps-visible argv for the whole timeout window.
+
+        Instead: a python child that sleeps then execs the tool directly with an argv list, and
+        takes the password on stdin so it never appears in the process table."""
+        helper = (
+            "import os,subprocess,sys,time\n"
+            "t=float(sys.argv[1]); iface=sys.argv[2]; ssid=sys.argv[3]\n"
+            "pw=sys.stdin.read()\n"
+            "time.sleep(t)\n"
+            "cmd=['networksetup','-setairportnetwork',iface,ssid]+([pw] if pw else [])\n"
+            "subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", helper, str(int(after_s)), self.iface, ssid],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+        proc.stdin.write((password or "").encode())
+        proc.stdin.close()
+        return proc
 
 
 # --- HTTP ---------------------------------------------------------------------------------------
@@ -278,10 +313,12 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
     the caller owns restoration, so a failure here can never skip it."""
     ssid = net["ssid"]
     ok, err = plat.join(ssid, None if net.get("open") else args.ap_password, args.connect_timeout)
-    if not ok:
-        report.append((ssid, "join-failed", err or "?"))
-        return
     try:
+        if not ok:
+            # Inside the try so the finally still forgets it: a failed join can still have added
+            # the SSID to the preferred list, which the OS would then auto-join later.
+            report.append((ssid, "join-failed", err or "?"))
+            return
         info = get_json(DEVICE_IP, "/json/info")
         good, mac, reason = identify(info)
         if not good:
@@ -350,7 +387,8 @@ def main():
 
     candidates = []
     for n in seen.values():
-        ok, why = is_candidate(n, patterns, not args.no_open_probe)
+        ok, why = is_candidate(n, patterns, not args.no_open_probe,
+                               exclude=(home_ssid, args.ssid))
         if ok:
             candidates.append((n, why))
 
@@ -395,12 +433,14 @@ def main():
         if not back:                       # retry once before admitting failure
             plat.join(home_ssid, args.home_password, args.connect_timeout)
             back = plat.wait_online(45)
-        dog.terminate()
         if back:
+            dog.terminate()       # only disarm once we are demonstrably back
             print(f"back on {home_ssid}.", file=sys.stderr)
         else:
-            print(f"WARNING: could not confirm rejoin to {home_ssid} "
-                  f"({err or 'no address'}). The watchdog may still recover it.", file=sys.stderr)
+            # Leave the watchdog ARMED. Disarming here and then claiming it might still help was
+            # both wrong and actively harmful: it removed the only remaining recovery path.
+            print(f"WARNING: could not confirm rejoin to {home_ssid} ({err or 'no address'}). "
+                  f"Watchdog left armed — it will force a rejoin shortly.", file=sys.stderr)
 
     pushed = [r for r in report if r[1] == "pushed"]
     if pushed and back:

@@ -36,11 +36,19 @@ do {
         // silently emitting an empty list, which reads as "no devices found".
         guard let ssid = n.ssid else { continue }
         let ch = n.wlanChannel?.channelNumber ?? -1
+        // Use CoreWLAN's own band rather than inferring from the channel number: 6GHz channels are
+        // numbered 1-233, so a `ch <= 14` test misclassifies them as 2.4GHz.
+        var band = -1
+        switch n.wlanChannel?.channelBand {
+        case .some(.band2GHz): band = 2
+        case .some(.band5GHz): band = 5
+        default: band = ch > 0 && ch <= 14 ? 2 : -1
+        }
         out.append([
             "ssid": ssid,
             "rssi": n.rssiValue,
             "channel": ch,
-            "band": ch <= 14 ? 2 : 5,
+            "band": band,
             // ESP32 APs are frequently open; treat "no security" as a candidate signal.
             "open": n.supportsSecurity(.none),
             "bssid": n.bssid ?? NSNull(),

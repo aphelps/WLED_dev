@@ -41,7 +41,7 @@ class TestCandidates(unittest.TestCase):
         # keeps the tool away from public hotspots (observed: xfinitywifi on channel 44).
         ok, why = aj.is_candidate(net("xfinitywifi", open_=True, band=5), PATTERNS, True)
         self.assertFalse(ok)
-        self.assertIn("5GHz", why)
+        self.assertIn("2.4GHz only", why)
 
     def test_secured_stranger_is_not(self):
         ok, _ = aj.is_candidate(net("CBCI-3B76", open_=False, band=2), PATTERNS, True)
@@ -50,6 +50,28 @@ class TestCandidates(unittest.TestCase):
     def test_open_probe_can_be_disabled(self):
         ok, _ = aj.is_candidate(net("Trancender", open_=True, band=2), PATTERNS, False)
         self.assertFalse(ok, "--no-open-probe must exclude open APs")
+
+    def test_our_own_networks_are_never_candidates(self):
+        # Without this a run joins the home network, finds no WLED device, and then FORGETS it —
+        # removing it from the preferred list on the way past.
+        ok, why = aj.is_candidate(net("HomeNet", open_=True, band=2), PATTERNS, True,
+                                  exclude=("HomeNet", "TargetNet"))
+        self.assertFalse(ok)
+        self.assertIn("our own", why)
+        ok, _ = aj.is_candidate(net("homenet", open_=True, band=2), PATTERNS, True,
+                                exclude=("HomeNet",))
+        self.assertFalse(ok, "exclusion must be case-insensitive")
+        # ...and a WLED-named AP is still excluded if it happens to be one of ours.
+        ok, _ = aj.is_candidate(net("WLED-AP"), PATTERNS, True, exclude=("WLED-AP",))
+        self.assertFalse(ok)
+
+    def test_unknown_band_fails_closed(self):
+        # Testing `!= 5` would let an unknown band through; require 2.4 positively.
+        for band in (None, -1, 6, 5):
+            ok, _ = aj.is_candidate(net("Mystery", open_=True, band=band), PATTERNS, True)
+            self.assertFalse(ok, f"band={band} must not be a candidate")
+        ok, _ = aj.is_candidate(net("Mystery", open_=True, band=2), PATTERNS, True)
+        self.assertTrue(ok)
 
     def test_user_pattern_extends_matching(self):
         ok, _ = aj.is_candidate(net("Studio-Left"), PATTERNS + ["Studio*"], False)
@@ -193,11 +215,15 @@ class TestProvisionOne(unittest.TestCase):
         self.assertEqual(rep[0][1], "would-push")
 
     def test_forgets_even_when_join_fails(self):
+        # This assertion was missing: the test passed against code that did the OPPOSITE of its
+        # name. A failed join can still have added the SSID to the preferred list, so forgetting
+        # it matters most on exactly this path.
         self.info = None
         plat, rep = FakePlatform(join_ok=False), []
         aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
         self.assertEqual(rep[0][1], "join-failed")
         self.assertEqual(self.posts, [])
+        self.assertIn("WLED-AP", plat.forgotten, "must forget the AP even when the join failed")
 
     def test_forgets_even_when_identification_raises(self):
         self.info = {"brand": "WLED", "mac": ESP_MAC}

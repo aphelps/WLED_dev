@@ -14,9 +14,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-router test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-router test-apjoin test-ui test-all clean
 
-test: test-wled test-bridge test-libs test-router
+test: test-wled test-bridge test-libs test-router test-apjoin
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
