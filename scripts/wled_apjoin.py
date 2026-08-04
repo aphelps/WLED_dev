@@ -233,8 +233,25 @@ class MacPlatform:
         subprocess.run(["networksetup", "-removepreferredwirelessnetwork", self.iface, ssid],
                        capture_output=True, text=True)
 
-    def wait_for_address(self, deadline_s=20):
+    def current_address(self):
+        """The interface's current IPv4 address, or "" if it has none."""
+        try:
+            r = subprocess.run(["ipconfig", "getifaddr", self.iface],
+                               capture_output=True, text=True, timeout=5)
+            return (r.stdout or "").strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def wait_for_address(self, deadline_s=20, different_from=None):
         """Block until the interface actually has an address. Returns it, or None on timeout.
+
+        `different_from` guards the case this function was originally written without: a join that
+        reports success but silently leaves us on the network we started on. Any address then
+        satisfies "we have an address", instantly — and the run goes on to probe 4.3.2.1 from the
+        home subnet, gets nothing, and reports the device as `not-wled  no /json/info response`.
+        That is the same lie as the bug this function was added to fix, one layer up: a radio
+        failure wearing a verdict about the device. Requiring the address to CHANGE is what
+        distinguishes "associated somewhere new" from "never went anywhere".
 
         Associating is not the same as being able to talk: `networksetup -setairportnetwork`
         returns once the association is up, but DHCP has not run yet, so an HTTP request issued
@@ -250,14 +267,10 @@ class MacPlatform:
         """
         end = time.time() + deadline_s
         while time.time() < end:
-            try:
-                r = subprocess.run(["ipconfig", "getifaddr", self.iface],
-                                   capture_output=True, text=True, timeout=5)
-                addr = (r.stdout or "").strip()
-            except (OSError, subprocess.SubprocessError):
-                addr = ""
+            addr = self.current_address()
             if addr and not addr.startswith("169.254."):   # 169.254 = associated, no lease yet
-                return addr
+                if not (different_from and addr == different_from):
+                    return addr
             time.sleep(0.5)
         return None
 
@@ -412,6 +425,7 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
     """Join one AP, identify it, maybe push credentials, leave. Returns after restoring nothing —
     the caller owns restoration, so a failure here can never skip it."""
     ssid = net["ssid"]
+    before_addr = plat.current_address()      # what "we moved" is measured against
     ok, err = plat.join(ssid, None if net.get("open") else args.ap_password, args.connect_timeout)
     try:
         if not ok:
@@ -419,9 +433,12 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
             # the SSID to the preferred list, which the OS would then auto-join later.
             report.append((ssid, "join-failed", err or "?"))
             return
-        # Wait for DHCP before speaking IP — see MacPlatform.wait_for_address.
-        if not plat.wait_for_address(args.ap_settle_timeout):
-            report.append((ssid, "join-failed", "associated but never got an address"))
+        # Wait for DHCP before speaking IP, and require the address to have CHANGED — see
+        # MacPlatform.wait_for_address for why "we have an address" alone is not enough.
+        if not plat.wait_for_address(args.ap_settle_timeout, different_from=before_addr):
+            report.append((ssid, "join-failed",
+                           f"never left {before_addr or 'the previous network'} — the join "
+                           f"reported success but the address did not change"))
             return
         info = get_json(DEVICE_IP, "/json/info")
         if info is None:
@@ -432,6 +449,18 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
         if not good:
             # Not ours: leave immediately, having sent nothing.
             report.append((ssid, "not-wled", reason))
+            return
+        if args.inspect:
+            # Read-only diagnosis. --dry-run answers "which APs would I touch?" without using the
+            # radio at all; this answers "why is that device refusing to join?", which can only be
+            # learned from the device itself. Nothing is ever sent — it returns before any push.
+            cfg = get_json(DEVICE_IP, "/json/cfg") or {}
+            apc = cfg.get("ap", {})
+            ins = (cfg.get("nw", {}).get("ins") or [{}])[0]
+            report.append((ssid, "inspected",
+                           f"{mac} ver={info.get('ver')} ap.behav={apc.get('behav')} "
+                           f"ap.chan={apc.get('chan')} nw.ssid={ins.get('ssid')!r} "
+                           f"nw.pskl={ins.get('pskl')}"))
             return
         action, why = decide_action(mac, lan_macs, attempts, args.max_attempts)
         if action != "push":
@@ -479,6 +508,9 @@ def main():
     ap.add_argument("--yes", action="store_true",
                     help="skip the confirmation prompt (one prompt covers the whole candidate list)")
     ap.add_argument("--dry-run", action="store_true", help="identify only; push nothing")
+    ap.add_argument("--inspect", action="store_true",
+                    help="join and report each device's config, pushing nothing "
+                         "(unlike --dry-run this does use the radio)")
     ap.add_argument("--iface", default="en0")
     ap.add_argument("--connect-timeout", type=int, default=30)
     ap.add_argument("--ap-settle-timeout", type=int, default=20,
@@ -589,7 +621,7 @@ def main():
     # RADIO is not. `join-failed` is the flapping case — the AP was there during the scan and gone
     # a second later — so that SSID stays eligible and we come back for it. Without this split the
     # run either gives up on a device that is merely mid-retry, or re-pushes to one it already did.
-    TERMINAL = {"pushed", "not-wled", "skip", "give-up", "push-failed"}
+    TERMINAL = {"pushed", "not-wled", "skip", "give-up", "push-failed", "inspected"}
     done, empty_rounds = set(), 0
     try:
         while True:

@@ -162,14 +162,20 @@ class FakePlatform:
     def __init__(self, join_ok=True, addr="4.3.2.2"):
         self.join_ok = join_ok
         self.addr = addr                 # None = associated but DHCP never completed
+        self.before_addr = "192.168.1.26"   # what the host had before any join
         self.joined, self.forgotten, self.waited = [], [], []
 
     def join(self, ssid, password=None, timeout=30):
         self.joined.append(ssid)
         return (True, None) if self.join_ok else (False, "no such network")
 
-    def wait_for_address(self, deadline_s=20):
+    def current_address(self):
+        return self.before_addr
+
+    def wait_for_address(self, deadline_s=20, different_from=None):
         self.waited.append(deadline_s)
+        if self.addr is not None and different_from and self.addr == different_from:
+            return None          # never left the network we started on
         return self.addr
 
     def forget(self, ssid):
@@ -183,6 +189,7 @@ class Args:
     # push_confirm_timeout is deliberately tiny: the give-up path polls for this long TWICE (push,
     # retry, give up), and at the 12s production default that is 24s of sleeping in a unit suite.
     ap_settle_timeout, push_confirm_timeout = 20, 1
+    inspect = False
 
 
 class TestProvisionOne(unittest.TestCase):
@@ -280,6 +287,19 @@ class TestProvisionOne(unittest.TestCase):
         self.assertEqual(self.posts, [], "a working device must not be rewritten")
         self.assertEqual(rep[0][1], "skip")
 
+    def test_inspect_pushes_nothing_and_does_not_reboot(self):
+        # --inspect exists to diagnose a device that will not join, so it runs against hardware
+        # someone is already unsure about. It must be provably read-only: no POST, no /reset, and
+        # the AP still forgotten on the way out.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        a = Args(); a.inspect = True
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), a, set(), {}, rep)
+        self.assertEqual(self.posts, [], "--inspect must never POST")
+        self.assertNotIn("/reset", self.gets, "--inspect must never reboot the device")
+        self.assertEqual(rep[0][1], "inspected")
+        self.assertIn("WLED-AP", plat.forgotten)
+
     def test_dry_run_pushes_nothing(self):
         self.info = {"brand": "WLED", "mac": ESP_MAC}
         a = Args(); a.dry_run = True
@@ -310,6 +330,19 @@ class TestProvisionOne(unittest.TestCase):
         self.assertEqual(self.posts, [], "nothing may be sent without an address")
         self.assertEqual(self.gets, [], "must not even probe before the lease lands")
         self.assertIn("WLED-AP", plat.forgotten)
+
+    def test_an_unchanged_address_is_a_join_failure_not_a_verdict(self):
+        # networksetup can report success while leaving the host exactly where it was. Any
+        # "do we have an address?" check then passes instantly on the HOME address, and the run
+        # probes 4.3.2.1 from the wrong subnet and blames the device: `not-wled  no /json/info
+        # response`. Seen live against WLED-TOUCH-MATRIX.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        plat, rep = FakePlatform(addr="192.168.1.26"), []      # same address as before the join
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "join-failed")
+        self.assertIn("never left", rep[0][2])
+        self.assertEqual(self.gets, [], "must not probe from the network we never left")
+        self.assertEqual(self.posts, [])
 
     def test_forgets_even_when_join_fails(self):
         # This assertion was missing: the test passed against code that did the OPPOSITE of its
