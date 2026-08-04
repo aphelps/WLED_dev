@@ -128,8 +128,9 @@ Basement speaker              not-wled        not WLED (brand=None)
 | `skip` | Already on this LAN — deliberately left alone. |
 | `would-push` | `--dry-run` only. |
 | `not-wled` | Something else answered; nothing was sent to it. |
-| `join-failed` | Couldn't associate to that AP at all. |
-| `push-failed` | Associated and identified, but the config POST failed. |
+| `inspected` | `--inspect` only: its config, reported. Nothing was sent. |
+| `join-failed` | Couldn't get onto that AP. The detail says which way it failed — the AP was gone by the time we tried, the association never produced an address, or `networksetup` claimed success while leaving us on the network we started on. |
+| `push-failed` | Either the POST itself failed, or the config never read back — in which case the device is deliberately **not** rebooted, since rebooting on an unsaved config is what loses the credentials. |
 | `give-up` | Retry cap hit. |
 
 Exit status: `0` everything worked · `1` something failed, or the rejoin couldn't be confirmed ·
@@ -165,18 +166,66 @@ networksetup -removepreferredwirelessnetwork en0 WLED-AP
 | `--ssid-pattern GLOB` | — | Extra name pattern; repeatable. |
 | `--no-open-probe` | off | Don't try open 2.4 GHz APs. Safer around strangers, but misses renamed devices. |
 | `--yes` | off | Skip the confirmation prompt. |
-| `--dry-run` | off | Identify only; join nothing, push nothing. |
+| `--dry-run` | off | Identify only; join nothing, push nothing. Uses no radio at all. |
+| `--inspect` | off | Join each device and report its config, pushing nothing. Unlike `--dry-run` this *does* use the radio. See below. |
+| `--adopt-deadline` | 0 | Keep re-scanning and retrying for this long. **Set this** if the APs are flapping — see below. 0 = single pass. |
+| `--rescan-interval` | 15 | Seconds between re-scans while waiting for an AP to reappear. |
 | `--iface` | `en0` | Wi-Fi interface. |
 | `--connect-timeout` | 30 | Seconds to wait for an association. |
-| `--safety-timeout` | 180 | Watchdog force-rejoin delay. |
+| `--ap-settle-timeout` | 20 | Seconds to wait for DHCP after associating, before speaking IP. |
+| `--push-confirm-timeout` | 12 | Seconds to wait for the pushed config to read back before rebooting the device. |
+| `--safety-timeout` | 180 | Watchdog force-rejoin delay. Raised automatically (out loud) if `--adopt-deadline` would outlive it. |
 | `--max-attempts` | 2 | Retry cap per device. |
 | `--verify-deadline` | 90 | Seconds to wait for pushed devices to reappear. |
 
+### When the APs come and go
+
+A device in AP-fallback drops its SoftAP every time it retries its own connection, so its AP
+appears and vanishes on a cycle of a minute or two. A single pass loses that race constantly: the
+AP is there during the scan and gone by the time the join runs (`join-failed  Could not find
+network …`), or it simply isn't up when you start.
+
+`--adopt-deadline` is the answer — it keeps re-scanning for that long:
+
+```bash
+scripts/wled_apjoin.py --ssid MyNetwork --password 'secret' --adopt-deadline 420
+```
+
+Verdicts about the *device* (`pushed`, `not-wled`, `skip`) are final, so nothing is ever pushed
+twice. Failures of the *radio* (`join-failed`) stay eligible, so a device is never written off for
+being mid-retry. The deadline also covers the opening scan, because finding nothing at t=0 is a
+normal starting state rather than a reason to quit.
+
+### Diagnosing a device that won't join
+
+If a device takes the credentials and still never appears, `--inspect` joins it and reports what it
+actually has stored, without sending anything:
+
+```bash
+scripts/wled_apjoin.py --ssid MyNetwork --password 'secret' --inspect --adopt-deadline 300
+```
+
+```
+SSID                          RESULT      DETAIL
+WLED-TOUCH-MATRIX             inspected   2cbcbbdaca60 ver=16.0.1 ap.behav=0 ap.chan=1 nw.ssid='STARLINK' nw.pskl=0
+```
+
+That line is a real diagnosis: the device is configured for a network called `STARLINK` with
+`pskl=0` — no stored passphrase — so it can never authenticate and falls back to its AP forever.
+`pskl` is the passphrase *length*; WLED never echoes the passphrase itself, and `0` against a
+non-empty SSID is the signature of credentials that didn't save.
+
 ### Known limitations
 
-- **Two devices broadcasting the same SSID are seen as one.** Candidates are deduplicated by name
-  and walked once, so if two stock devices are both advertising `WLED-AP`, only one gets adopted per
-  run. Run it again for the next one. (`--max-attempts` only engages across such repeat runs.)
+- **Two devices broadcasting the same SSID are seen as one.** Candidates are deduplicated by name,
+  so if two stock devices are both advertising `WLED-AP`, only one is adopted per sweep. With
+  `--adopt-deadline` set the second is usually picked up on a later pass — once the first has
+  rebooted onto your network its AP is gone, and the name resolves to the remaining device. Without
+  the deadline, run the tool again.
+- **Association can simply fail, repeatedly.** With a short-lived AP and a marginal signal,
+  `networksetup` may not get on at all — the run reports honest `join-failed` rows rather than
+  guessing. Moving the machine closer is usually the fix; a device whose config you already know is
+  often faster to correct directly at `http://4.3.2.1` while its AP is up.
 - **macOS only.** See `PORTING_NOTES` in the script.
 - **Not for an ESP32 to run.** A single-radio ESP32 shares one channel between its AP and STA
   interfaces, so hopping onto a device's AP drags its own SoftAP to that channel and drops its
