@@ -5,6 +5,7 @@
 #   make test-bridge# just the WLED rs485_bridge wire-format/decision tests
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
 #   make test-router# just the esp-now-router relay + leader-election tests
+#   make test-apjoin# just the scripts/wled_apjoin.py host tests (see scripts/README.md)
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
 #

@@ -10,10 +10,14 @@ success, failure, exception and signal, plus a detached watchdog that force-rest
 process is killed outright.
 
 Usage:
-  scripts/wled_apjoin.py --ssid MyNetwork --password secret --home-ssid MyNetwork
-  scripts/wled_apjoin.py --ssid MyNetwork --password secret --home-ssid MyNetwork --dry-run
-  scripts/wled_apjoin.py ... --yes            # do not confirm each device
+  scripts/wled_apjoin.py --ssid MyNetwork --password secret --dry-run   # always start here
+  scripts/wled_apjoin.py --ssid MyNetwork --password secret
+  scripts/wled_apjoin.py ... --home-ssid OtherNetwork   # where THIS machine returns to
+  scripts/wled_apjoin.py ... --yes                      # skip the confirmation prompt
   scripts/wled_apjoin.py ... --ssid-pattern 'Studio*'
+
+Prerequisites, the output table, recovery if it leaves you off the network, and the known
+limitations are all in scripts/README.md.
 """
 
 import argparse
@@ -355,7 +359,8 @@ def main():
     ap.add_argument("--ssid-pattern", action="append", default=[], metavar="GLOB")
     ap.add_argument("--no-open-probe", action="store_true",
                     help="do not try open 2.4GHz APs (skips renamed devices)")
-    ap.add_argument("--yes", action="store_true", help="do not confirm each device")
+    ap.add_argument("--yes", action="store_true",
+                    help="skip the confirmation prompt (one prompt covers the whole candidate list)")
     ap.add_argument("--dry-run", action="store_true", help="identify only; push nothing")
     ap.add_argument("--iface", default="en0")
     ap.add_argument("--connect-timeout", type=int, default=30)
