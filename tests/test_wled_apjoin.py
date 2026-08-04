@@ -86,6 +86,21 @@ class TestIdentity(unittest.TestCase):
         self.assertFalse(aj.is_espressif(None))
         self.assertFalse(aj.is_espressif(""))
 
+    def test_oui_table_is_the_full_assignment_not_a_sample(self):
+        # Regression for the first live run: WLED-TOUCH-BOX reported 2c:bc:bb — a real Espressif
+        # prefix that the original hand-picked 34-entry table lacked — so an actual WLED device was
+        # refused with "MAC is not Espressif". The table is now every prefix IEEE has assigned to
+        # Espressif; a count assertion is what catches someone trimming it back to "the ones we
+        # use", which is precisely how the bug was introduced.
+        self.assertTrue(aj.is_espressif("2cbcbbd98960"), "the OUI that broke the first live run")
+        self.assertGreaterEqual(len(aj.ESPRESSIF_OUIS), 331)
+        # `o == o.lower()`, not `o.islower()`: an all-digit prefix like "202565" has no cased
+        # characters, so islower() is False for it and the assertion would fail on valid data.
+        bad = [o for o in aj.ESPRESSIF_OUIS
+               if len(o) != 6 or o != o.lower() or not all(c in "0123456789abcdef" for c in o)]
+        self.assertEqual(bad, [], "entries must be lowercase 6-hex-char prefixes — is_espressif "
+                                  "lowercases its input, so an uppercase entry never matches")
+
     def test_identify_requires_both_brand_and_oui(self):
         ok, mac, _ = aj.identify({"brand": "WLED", "mac": ESP_MAC})
         self.assertTrue(ok)
@@ -144,13 +159,18 @@ class TestConfigBody(unittest.TestCase):
 
 # --- fake platform ------------------------------------------------------------------------------
 class FakePlatform:
-    def __init__(self, join_ok=True):
+    def __init__(self, join_ok=True, addr="4.3.2.2"):
         self.join_ok = join_ok
-        self.joined, self.forgotten = [], []
+        self.addr = addr                 # None = associated but DHCP never completed
+        self.joined, self.forgotten, self.waited = [], [], []
 
     def join(self, ssid, password=None, timeout=30):
         self.joined.append(ssid)
         return (True, None) if self.join_ok else (False, "no such network")
+
+    def wait_for_address(self, deadline_s=20):
+        self.waited.append(deadline_s)
+        return self.addr
 
     def forget(self, ssid):
         self.forgotten.append(ssid)
@@ -160,6 +180,9 @@ class Args:
     ssid, password, pin = "HomeNet", "homepass", None
     ap_password, connect_timeout = "wled1234", 5
     dry_run, max_attempts = False, 2
+    # push_confirm_timeout is deliberately tiny: the give-up path polls for this long TWICE (push,
+    # retry, give up), and at the 12s production default that is 24s of sleeping in a unit suite.
+    ap_settle_timeout, push_confirm_timeout = 20, 1
 
 
 class TestProvisionOne(unittest.TestCase):
@@ -168,8 +191,16 @@ class TestProvisionOne(unittest.TestCase):
     def setUp(self):
         self.posts = []
         self.gets = []
+        # Path-aware: /json/cfg is what confirm_cfg reads back, and it has to be able to disagree
+        # with what /json/info says, or the "config did not persist" path cannot be tested at all.
+        self.cfg = {"nw": {"ins": [{"ssid": Args.ssid, "pskl": len(Args.password)}]}}
         self._get, self._post = aj.get_json, aj.post_json
-        aj.get_json = lambda h, p, timeout=5: self.gets.append(p) or self.info
+
+        def fake_get(host, path, timeout=5):
+            self.gets.append(path)
+            return self.cfg if path == "/json/cfg" else self.info
+
+        aj.get_json = fake_get
         aj.post_json = lambda h, p, b, timeout=10: (self.posts.append((p, b)), ("{}", None))[1]
 
     def tearDown(self):
@@ -182,6 +213,49 @@ class TestProvisionOne(unittest.TestCase):
         self.assertEqual([p for p, _ in self.posts], ["/json/cfg"])
         self.assertEqual(rep[0][1], "pushed")
         self.assertIn("WLED-AP", plat.forgotten)
+
+    def test_does_not_reboot_a_device_whose_config_never_persisted(self):
+        # Live regression: POST /json/cfg applies the values but defers the flash write to a later
+        # main-loop pass, so an immediate /reset can reboot the device before cfg.json is written
+        # and the credentials vanish. Observed on WLED-TOUCH-MATRIX — reported `pushed`, came back
+        # up still broadcasting its AP. Rebooting unconfirmed turns a fixable failure into a
+        # confident lie in the report.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        self.cfg = {"nw": {"ins": [{"ssid": "SomethingElse", "pskl": 0}]}}  # push never took
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "push-failed")
+        self.assertNotIn("/reset", self.gets, "must not reboot a device with unsaved config")
+        self.assertEqual(len([p for p, _ in self.posts if p == "/json/cfg"]), 2,
+                         "should retry the push once before giving up")
+
+    def test_confirms_the_config_before_rebooting(self):
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "pushed")
+        self.assertIn("/json/cfg", self.gets, "must read the config back")
+        self.assertLess(self.gets.index("/json/cfg"), self.gets.index("/reset"),
+                        "the read-back has to happen BEFORE the reboot to mean anything")
+
+    def test_a_saved_ssid_with_an_unsaved_passphrase_is_not_success(self):
+        # WLED never echoes the PSK, it returns the stored length as `pskl`. Confirming only the
+        # SSID would call this a success and reboot a device that can never authenticate — the
+        # symptom being a device that looks configured and silently never appears on the network.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        self.cfg = {"nw": {"ins": [{"ssid": Args.ssid, "pskl": 0}]}}
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "push-failed")
+        self.assertNotIn("/reset", self.gets)
+
+    def test_missing_pskl_does_not_fail_an_otherwise_good_device(self):
+        # Older builds omit `pskl`. Absent must mean "cannot disprove", not "wrong".
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        self.cfg = {"nw": {"ins": [{"ssid": Args.ssid}]}}
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "pushed")
 
     def test_never_pushes_to_a_non_wled_ap(self):
         # The safety property. Open-AP probing means associating to networks that are not ours;
@@ -213,6 +287,29 @@ class TestProvisionOne(unittest.TestCase):
         aj.provision_one(plat, net("WLED-AP"), a, set(), {}, rep)
         self.assertEqual(self.posts, [])
         self.assertEqual(rep[0][1], "would-push")
+
+    def test_waits_for_dhcp_before_speaking_ip(self):
+        # Live regression: networksetup returns on association, before DHCP. Probing immediately
+        # got "no /json/info response" — reported as `not-wled`, i.e. a real device misclassified
+        # as a stranger. Same two devices, two consecutive runs, opposite answers, purely on
+        # timing. The wait must happen BEFORE the first HTTP request, not as a longer timeout on it.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(plat.waited, [20], "must wait for an address before any HTTP")
+        self.assertEqual(rep[0][1], "pushed")
+
+    def test_no_dhcp_lease_is_a_join_failure_not_a_verdict_on_the_device(self):
+        # Never let "we could not get an address" masquerade as "not a WLED device": that reads as
+        # a hardware problem and sends someone debugging the wrong box.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        plat, rep = FakePlatform(addr=None), []
+        aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
+        self.assertEqual(rep[0][1], "join-failed")
+        self.assertNotEqual(rep[0][1], "not-wled")
+        self.assertEqual(self.posts, [], "nothing may be sent without an address")
+        self.assertEqual(self.gets, [], "must not even probe before the lease lands")
+        self.assertIn("WLED-AP", plat.forgotten)
 
     def test_forgets_even_when_join_fails(self):
         # This assertion was missing: the test passed against code that did the OPPOSITE of its

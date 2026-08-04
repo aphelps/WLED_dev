@@ -41,12 +41,51 @@ DEFAULT_PATTERNS = ["WLED-AP", "WLED-*", "WLED_*"]
 
 # Espressif OUIs. Checked on info.mac AFTER associating — BSSIDs are withheld at scan time, so
 # this cannot be a scan filter, but it can gate the credential push.
+#
+# All 331 prefixes IEEE has assigned to Espressif, not a hand-picked subset. That distinction is
+# not academic: this started as 34 OUIs guessed from devices we happened to have seen, and the
+# first live run against real hardware hit `WLED-TOUCH-BOX` on 2c:bc:bb — genuinely Espressif,
+# genuinely missing — so a real WLED device was refused with "MAC is not Espressif". An allowlist
+# that fails closed is the right shape, but only if it is actually complete; an incomplete one
+# just means the tool does not work and blames the device.
 ESPRESSIF_OUIS = {
-    "244cab", "24a160", "240ac4", "2462ab", "3c71bf", "483fda", "4c11ae", "500291",
-    "5ccf7f", "600194", "68c63a", "7cdfa1", "807d3a", "840d8e", "8caab5", "94b97e",
-    "9c9c1f", "a020a6", "a4cf12", "a8032a", "ac67b2", "b4e62d", "bcddc2", "c44f33",
-    "cc50e3", "d8a01d", "d8bfc0", "dc4f22", "e09806", "e8db84", "ecfabc", "f008d1",
-    "f4cfa2", "fcf5c4",
+    "004b12", "007007", "048308", "04b247", "083a8d", "083af2", "089272", "08a6f7", "08ad0a",
+    "08b61f", "08d1f9", "08f9e0", "0c4ea0", "0c8b95", "0cb815", "0cdc7e", "10003b", "10061c",
+    "1020ba", "1051db", "10521c", "1091a8", "1097bd", "10b41d", "10bda3", "140808", "142b2f",
+    "14335c", "146393", "14c19f", "188b0e", "18fe34", "1c2904", "1c6920", "1c8f57", "1c9dc2",
+    "1cc3ab", "1cdbd4", "202565", "2043a8", "20500d", "206ef1", "209ba9", "20e7c8", "240ac4",
+    "244cab", "24587c", "2462ab", "246f28", "24a160", "24b2de", "24d7eb", "24dcc3", "24ec4a",
+    "2805a5", "28372f", "28562f", "288485", "2c3ae8", "2cbcbb", "2cf432", "3030f9", "3076f5",
+    "308398", "30aea4", "30c6f7", "30c922", "30eda0", "345f45", "348518", "34865d", "349454",
+    "34987a", "34ab95", "34b472", "34b7da", "34cdb0", "38182b", "383e51", "3844be", "3c0f02",
+    "3c6105", "3c71bf", "3c8427", "3c8a1f", "3cdc75", "3ce90e", "4022d8", "404cca", "409151",
+    "40f520", "441793", "441bf6", "441d64", "44b176", "44bd8d", "4827e2", "4831b7", "483fda",
+    "485519", "489d31", "48aff3", "48ca43", "48e729", "48f6ee", "4c11ae", "4c7525", "4cc382",
+    "4cebd6", "500291", "50787d", "543204", "5443b2", "545aa6", "582abd", "588c81", "58bf25",
+    "58cf79", "58e6c5", "5c013b", "5ccf7f", "600194", "6055f9", "64b708", "64e833", "680947",
+    "6825dd", "686725", "689dd2", "68b6b3", "68c63a", "68ee8f", "68fe71", "6cb456", "6cc840",
+    "70039f", "70041d", "704bca", "70af09", "70b8f6", "744dbd", "781c3c", "782184", "78421c",
+    "78e36d", "78ee4c", "7c0c5f", "7c2c67", "7c4fad", "7c7398", "7c87ce", "7c9ebd", "7cd544",
+    "7cdfa1", "7ce8b1", "80456b", "8053e0", "80646f", "806599", "807d3a", "80b54e", "80f1b2",
+    "80f3da", "840d8e", "841fe8", "84c7bb", "84cca8", "84f3eb", "84f703", "84fce6", "8813bf",
+    "8856a6", "885721", "88f155", "8c4b14", "8c4f00", "8c8c29", "8c94df", "8caab5", "8cbfea",
+    "8cce4e", "8cfd49", "901506", "90380c", "90649b", "907069", "9097d5", "90b339", "90da72",
+    "90e5b1", "943cc6", "9451dc", "9454c5", "94a990", "94b555", "94b97e", "94e686", "983dae",
+    "9888e0", "98a316", "98c377", "98cdac", "98f4ab", "9c139e", "9c9c1f", "9c9e6e", "9ccc01",
+    "a020a6", "a0764e", "a085e3", "a0a3b3", "a0b765", "a0dd6c", "a0f262", "a47b9d", "a4cb8f",
+    "a4cf12", "a4e57c", "a4f00f", "a8032a", "a842e3", "a84674", "a848fa", "ac0bfb", "ac1518",
+    "ac276e", "ac67b2", "aca704", "acd074", "acebe6", "b03fd3", "b08184", "b0a604", "b0a732",
+    "b0b21c", "b0cbd8", "b43a45", "b48a0a", "b4a64a", "b4bfe9", "b4e62d", "b81f3f", "b87b4d",
+    "b8d61a", "b8f009", "b8f862", "bcddc2", "bcff4d", "c049ef", "c04e30", "c05d89", "c0cdd6",
+    "c44f33", "c45bbe", "c49e7e", "c4d8d5", "c4dd57", "c4dee2", "c82b96", "c82e18", "c88541",
+    "c88a7b", "c8c9a3", "c8f09e", "cc50e3", "cc68c7", "cc7b5c", "cc7e1f", "cc8da2", "ccba97",
+    "ccdba7", "d0cf13", "d0ef76", "d40592", "d48afc", "d48c49", "d4d4da", "d4e9f4", "d4f98d",
+    "d8132a", "d83bda", "d885ac", "d8a01d", "d8bc38", "d8bfc0", "d8f15b", "dc0675", "dc0a69",
+    "dc1ed5", "dc4f22", "dc5475", "dcb4d9", "dcda0c", "e05a1b", "e072a1", "e08cfe", "e09806",
+    "e0e2e6", "e465b8", "e4b063", "e4b323", "e80690", "e831cd", "e83dc1", "e868e7", "e86bea",
+    "e89f6d", "e8db84", "e8f60a", "ec6260", "ec64c9", "ec94cb", "ecc9ff", "ecda3b", "ece334",
+    "ecfabc", "f008d1", "f0161d", "f024f9", "f09e9e", "f0f5bd", "f412fa", "f42dc9", "f4650b",
+    "f4cfa2", "f85b1b", "f8b3b7", "fc012c", "fcb467", "fce8c0", "fcf5c4",
 }
 
 
@@ -194,6 +233,34 @@ class MacPlatform:
         subprocess.run(["networksetup", "-removepreferredwirelessnetwork", self.iface, ssid],
                        capture_output=True, text=True)
 
+    def wait_for_address(self, deadline_s=20):
+        """Block until the interface actually has an address. Returns it, or None on timeout.
+
+        Associating is not the same as being able to talk: `networksetup -setairportnetwork`
+        returns once the association is up, but DHCP has not run yet, so an HTTP request issued
+        immediately afterwards fails with no route. That failure is indistinguishable from "this
+        AP is not a WLED device" in the report, which is exactly how it presented live — the same
+        device answered on one run and came back `not-wled  no /json/info response` on the next,
+        purely on timing. Waiting for the lease removes the race rather than papering over it with
+        a longer HTTP timeout, which would not help: there is no route to time out against.
+
+        Deliberately accepts any non-link-local address rather than requiring 4.3.2.x — a stranger
+        AP hands out something else entirely, and we still want to probe it and get a clean
+        `not-wled` rather than sitting here until the deadline.
+        """
+        end = time.time() + deadline_s
+        while time.time() < end:
+            try:
+                r = subprocess.run(["ipconfig", "getifaddr", self.iface],
+                                   capture_output=True, text=True, timeout=5)
+                addr = (r.stdout or "").strip()
+            except (OSError, subprocess.SubprocessError):
+                addr = ""
+            if addr and not addr.startswith("169.254."):   # 169.254 = associated, no lease yet
+                return addr
+            time.sleep(0.5)
+        return None
+
     def is_connected(self):
         """Back on a real network — NOT merely holding an address.
 
@@ -273,6 +340,35 @@ def post_json(host, path, body, timeout=10):
         return None, str(e)
 
 
+def confirm_cfg(host, want_ssid, want_psk_len, deadline_s=12):
+    """Poll GET /json/cfg until the device reports back the credentials we pushed. True if stuck.
+
+    Checks the passphrase too, via `pskl`. WLED never echoes the PSK — it returns the stored
+    *length* instead — and that is enough to catch the failure that matters: an SSID that saved
+    while the passphrase did not, which produces a device that looks correctly configured and can
+    never authenticate. Confirming only the SSID would report that as success.
+
+    Conservative on failure to read: if /json/cfg cannot be fetched at all (a PIN is set, or the
+    endpoint is unavailable), we cannot confirm and return False rather than assuming success —
+    the caller then retries the push and, failing that, reports it honestly instead of rebooting
+    a device into a config that may never have been saved.
+    """
+    end = time.time() + deadline_s
+    while time.time() < end:
+        cfg = get_json(host, "/json/cfg")
+        try:
+            ins = cfg["nw"]["ins"][0]
+            # `pskl` is absent on older builds; treat missing as "cannot disprove" rather than
+            # failing a device that is actually fine.
+            psk_ok = ins.get("pskl", want_psk_len) == want_psk_len
+            if ins["ssid"] == want_ssid and psk_ok:
+                return True
+        except (KeyError, IndexError, TypeError):
+            pass
+        time.sleep(1.0)
+    return False
+
+
 def lan_device_macs(timeout=2.0):
     """MACs currently on this LAN, via the existing scanner. This is a correctness input, not just
     verification: a device found here is left alone."""
@@ -323,7 +419,15 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
             # the SSID to the preferred list, which the OS would then auto-join later.
             report.append((ssid, "join-failed", err or "?"))
             return
+        # Wait for DHCP before speaking IP — see MacPlatform.wait_for_address.
+        if not plat.wait_for_address(args.ap_settle_timeout):
+            report.append((ssid, "join-failed", "associated but never got an address"))
+            return
         info = get_json(DEVICE_IP, "/json/info")
+        if info is None:
+            # One retry: the lease can land a beat before the device's HTTP server is serving.
+            time.sleep(2.0)
+            info = get_json(DEVICE_IP, "/json/info", timeout=8)
         good, mac, reason = identify(info)
         if not good:
             # Not ours: leave immediately, having sent nothing.
@@ -341,6 +445,19 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
         if perr:
             report.append((ssid, "push-failed", perr))
             return
+        # Read the SSID back before rebooting. POST /json/cfg does NOT write the file inline: it
+        # applies the values and flags a serialize that happens on a later main-loop pass, so a
+        # /reset issued immediately can reboot the device before cfg.json is written and the
+        # credentials are simply lost. That is not theoretical — of the two devices adopted in the
+        # first successful live run, one came back up still broadcasting its AP, having accepted
+        # the push a moment earlier. Polling the value back is the only honest confirmation; a
+        # fixed sleep just moves the race.
+        pskl = len(args.password or "")
+        if not confirm_cfg(DEVICE_IP, args.ssid, pskl, args.push_confirm_timeout):
+            post_json(DEVICE_IP, "/json/cfg", body)          # one more try
+            if not confirm_cfg(DEVICE_IP, args.ssid, pskl, args.push_confirm_timeout):
+                report.append((ssid, "push-failed", "config did not persist (never read back)"))
+                return
         get_json(DEVICE_IP, "/reset")     # /json/cfg does not reboot on its own
         attempts[mac] = attempts.get(mac, 0) + 1
         report.append((ssid, "pushed", f"{mac} — rebooting"))
@@ -364,14 +481,35 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="identify only; push nothing")
     ap.add_argument("--iface", default="en0")
     ap.add_argument("--connect-timeout", type=int, default=30)
+    ap.add_argument("--ap-settle-timeout", type=int, default=20,
+                    help="seconds to wait for DHCP after associating to a device AP")
+    ap.add_argument("--adopt-deadline", type=int, default=0, metavar="SECONDS",
+                    help="keep re-scanning and retrying for this long, because a device in "
+                         "AP-fallback drops its AP while it retries its own connection "
+                         "(0 = single pass)")
+    ap.add_argument("--rescan-interval", type=int, default=15,
+                    help="seconds between re-scans while waiting for an AP to reappear")
     ap.add_argument("--safety-timeout", type=int, default=180)
     ap.add_argument("--max-attempts", type=int, default=2)
     ap.add_argument("--verify-deadline", type=int, default=90)
+    ap.add_argument("--push-confirm-timeout", type=int, default=12,
+                    help="seconds to wait for the pushed config to read back "
+                         "before rebooting the device")
     args = ap.parse_args()
 
     home_ssid = args.home_ssid or args.ssid
     plat = MacPlatform(args.iface)
     patterns = DEFAULT_PATTERNS + args.ssid_pattern
+
+    # The watchdog is armed once, before the loop. If it can fire while the loop is still working,
+    # it force-rejoins home mid-adoption and the run silently does half its job. Raise it rather
+    # than letting the two settings quietly contradict each other — but say so, because this is a
+    # safety parameter and moving one behind the user's back is its own kind of surprise.
+    needed = args.adopt_deadline + 120
+    if args.adopt_deadline and args.safety_timeout < needed:
+        print(f"note: raising --safety-timeout {args.safety_timeout}s → {needed}s so the watchdog "
+              f"cannot fire during a {args.adopt_deadline}s adoption window", file=sys.stderr)
+        args.safety_timeout = needed
 
     # Pre-flight: know what is already here BEFORE touching the radio. This is a correctness input
     # — a device found now is left alone rather than needlessly rewritten.
@@ -379,23 +517,46 @@ def main():
     lan_macs = lan_device_macs()
     print(f"  {len(lan_macs)} WLED device(s) already on this LAN", file=sys.stderr)
 
-    nets, err = plat.scan()
+    def find_candidates(exclude_ssids=()):
+        """One scan pass → [(net, why)]. Broken out because the AP set is not stable: a device in
+        AP-fallback drops its SoftAP each time it retries its STA connection, so a candidate seen
+        in the opening scan is routinely gone by the time we try to join it, and one that was
+        absent appears a minute later. Confirmed live on two devices. The caller re-runs this."""
+        nets, err = plat.scan()
+        if err:
+            return None, err
+        seen = {n["ssid"]: n for n in nets}
+        for pat in patterns:                  # targeted probes: a sweep has been seen to miss one
+            if "*" not in pat and "?" not in pat:
+                hits, _ = plat.scan(pat)
+                for h in hits:
+                    seen.setdefault(h["ssid"], h)
+        out = []
+        for n in seen.values():
+            if n["ssid"] in exclude_ssids:
+                continue
+            ok, why = is_candidate(n, patterns, not args.no_open_probe,
+                                   exclude=(home_ssid, args.ssid))
+            if ok:
+                out.append((n, why))
+        return out, None
+
+    # One deadline for the whole run, started here rather than after discovery. With flapping APs
+    # the opening scan finding nothing is a normal starting state, not a reason to quit — quitting
+    # there is why a `--adopt-deadline` run could exit immediately having done nothing at all.
+    deadline = time.time() + args.adopt_deadline
+
+    candidates, err = find_candidates()
     if err:
         print(f"error: {err}", file=sys.stderr)
         return 2
-    seen = {n["ssid"]: n for n in nets}
-    for pat in patterns:                      # targeted probes: a sweep has been seen to miss one
-        if "*" not in pat and "?" not in pat:
-            hits, _ = plat.scan(pat)
-            for h in hits:
-                seen.setdefault(h["ssid"], h)
-
-    candidates = []
-    for n in seen.values():
-        ok, why = is_candidate(n, patterns, not args.no_open_probe,
-                               exclude=(home_ssid, args.ssid))
-        if ok:
-            candidates.append((n, why))
+    while not candidates and time.time() < deadline:
+        print(f"  …no candidate APs yet, waiting ({int(deadline - time.time())}s left)",
+              file=sys.stderr)
+        time.sleep(args.rescan_interval)
+        candidates, err = find_candidates()
+        if err:
+            candidates = []
 
     if not candidates:
         print("No candidate APs found.", file=sys.stderr)
@@ -424,9 +585,41 @@ def main():
     # which is the case a plain background child does not cover.
     dog = plat.watchdog(home_ssid, args.home_password, args.safety_timeout)
     attempts, report = {}, []
+    # A verdict that says something about the DEVICE is final; one that says something about the
+    # RADIO is not. `join-failed` is the flapping case — the AP was there during the scan and gone
+    # a second later — so that SSID stays eligible and we come back for it. Without this split the
+    # run either gives up on a device that is merely mid-retry, or re-pushes to one it already did.
+    TERMINAL = {"pushed", "not-wled", "skip", "give-up", "push-failed"}
+    done, empty_rounds = set(), 0
     try:
-        for n, _why in candidates:
-            provision_one(plat, n, args, lan_macs, attempts, report)
+        while True:
+            for n, _why in candidates:
+                if n["ssid"] in done:
+                    continue
+                mark = len(report)
+                provision_one(plat, n, args, lan_macs, attempts, report)
+                if any(r[1] in TERMINAL for r in report[mark:]):
+                    done.add(n["ssid"])
+
+            if time.time() >= deadline:
+                break
+            # Stop once things have settled: everything seen has a final verdict and two further
+            # scans turned up nothing new. Two rather than one because a single empty scan means
+            # very little when the APs are known to blink in and out.
+            candidates, serr = find_candidates(exclude_ssids=done)
+            if serr:
+                candidates = []
+            if candidates:
+                empty_rounds = 0
+                print(f"  …{len(candidates)} AP(s) back in range: "
+                      f"{', '.join(c[0]['ssid'] for c in candidates)}", file=sys.stderr)
+            else:
+                empty_rounds += 1
+                if empty_rounds >= 2 and done:
+                    break
+                remaining = int(deadline - time.time())
+                print(f"  …waiting for APs to reappear ({remaining}s left)", file=sys.stderr)
+                time.sleep(args.rescan_interval)
     except KeyboardInterrupt:
         print("\ninterrupted — restoring network…", file=sys.stderr)
     finally:
