@@ -190,6 +190,7 @@ class Args:
     # retry, give up), and at the 12s production default that is 24s of sleeping in a unit suite.
     ap_settle_timeout, push_confirm_timeout = 20, 1
     inspect = False
+    join_retries, join_retry_delay = 1, 0.0
 
 
 class TestProvisionOne(unittest.TestCase):
@@ -343,6 +344,27 @@ class TestProvisionOne(unittest.TestCase):
         self.assertIn("never left", rep[0][2])
         self.assertEqual(self.gets, [], "must not probe from the network we never left")
         self.assertEqual(self.posts, [])
+
+    def test_retries_the_join_before_giving_up(self):
+        # macOS serves cached scan results, so a candidate can be an artifact of an AP that has
+        # already cycled off. One attempt per sighting loses that race repeatedly; the retry has
+        # to happen in place, because re-scanning to retry just re-reads the same cache.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        a = Args(); a.join_retries, a.join_retry_delay = 3, 0.0
+        plat, rep = FakePlatform(join_ok=False), []
+        aj.provision_one(plat, net("WLED-AP"), a, set(), {}, rep)
+        self.assertEqual(len(plat.joined), 3, "must actually retry, not just report that it did")
+        self.assertEqual(rep[0][1], "join-failed")
+        self.assertIn("after 3 attempts", rep[0][2])
+        self.assertIn("WLED-AP", plat.forgotten)
+
+    def test_stops_retrying_as_soon_as_it_is_on(self):
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        a = Args(); a.join_retries, a.join_retry_delay = 5, 0.0
+        plat, rep = FakePlatform(), []
+        aj.provision_one(plat, net("WLED-AP"), a, set(), {}, rep)
+        self.assertEqual(len(plat.joined), 1, "a successful join must not keep retrying")
+        self.assertEqual(rep[0][1], "pushed")
 
     def test_forgets_even_when_join_fails(self):
         # This assertion was missing: the test passed against code that did the OPPOSITE of its

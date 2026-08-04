@@ -426,19 +426,35 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
     the caller owns restoration, so a failure here can never skip it."""
     ssid = net["ssid"]
     before_addr = plat.current_address()      # what "we moved" is measured against
-    ok, err = plat.join(ssid, None if net.get("open") else args.ap_password, args.connect_timeout)
     try:
-        if not ok:
-            # Inside the try so the finally still forgets it: a failed join can still have added
-            # the SSID to the preferred list, which the OS would then auto-join later.
-            report.append((ssid, "join-failed", err or "?"))
-            return
-        # Wait for DHCP before speaking IP, and require the address to have CHANGED — see
-        # MacPlatform.wait_for_address for why "we have an address" alone is not enough.
-        if not plat.wait_for_address(args.ap_settle_timeout, different_from=before_addr):
+        # Retry the join in place rather than waiting for the next scan. macOS serves cached
+        # scan results — repeat sweeps come back in well under a second — so a candidate can be
+        # a cache artifact of an AP that has already gone, and the join then fails with "Could
+        # not find network" against an AP the scan just reported. Re-scanning to retry costs
+        # seconds and re-reads the same cache; retrying the join directly is both faster and
+        # actually samples the radio. Everything is inside the try so the finally still forgets
+        # the SSID: even a failed join can add it to the preferred list, which the OS would
+        # then auto-join later on its own.
+        joined, err = False, None
+        tries = max(1, args.join_retries)
+        for i in range(tries):
+            ok, jerr = plat.join(ssid, None if net.get("open") else args.ap_password,
+                                 args.connect_timeout)
+            if not ok:
+                err = jerr or "?"
+            # Wait for DHCP before speaking IP, and require the address to have CHANGED — see
+            # MacPlatform.wait_for_address for why "we have an address" alone is not enough.
+            elif plat.wait_for_address(args.ap_settle_timeout, different_from=before_addr):
+                joined = True
+                break
+            else:
+                err = (f"never left {before_addr or 'the previous network'} — the join "
+                       f"reported success but the address did not change")
+            if i + 1 < tries:
+                time.sleep(args.join_retry_delay)
+        if not joined:
             report.append((ssid, "join-failed",
-                           f"never left {before_addr or 'the previous network'} — the join "
-                           f"reported success but the address did not change"))
+                           f"{err or '?'} (after {tries} attempt{'s' if tries != 1 else ''})"))
             return
         info = get_json(DEVICE_IP, "/json/info")
         if info is None:
@@ -513,6 +529,11 @@ def main():
                          "(unlike --dry-run this does use the radio)")
     ap.add_argument("--iface", default="en0")
     ap.add_argument("--connect-timeout", type=int, default=30)
+    ap.add_argument("--join-retries", type=int, default=4,
+                    help="attempts to associate to one AP before moving on (its AP may have "
+                         "vanished between the scan and the join)")
+    ap.add_argument("--join-retry-delay", type=float, default=4.0,
+                    help="seconds between those attempts")
     ap.add_argument("--ap-settle-timeout", type=int, default=20,
                     help="seconds to wait for DHCP after associating to a device AP")
     ap.add_argument("--adopt-deadline", type=int, default=0, metavar="SECONDS",
