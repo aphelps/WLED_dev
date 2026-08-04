@@ -472,11 +472,29 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
             # learned from the device itself. Nothing is ever sent — it returns before any push.
             cfg = get_json(DEVICE_IP, "/json/cfg") or {}
             apc = cfg.get("ap", {})
-            ins = (cfg.get("nw", {}).get("ins") or [{}])[0]
+            # EVERY entry, with its static-IP fields. Reading only ins[0]'s ssid/pskl hides two
+            # things that look identical from outside: a second configured network taking
+            # priority, and a leftover STATIC IP. A stale static address is the nastier one — the
+            # device associates perfectly and is then simply unreachable on the wrong subnet, which
+            # presents exactly like "it never joined". build_wifi_cfg writes only ssid/psk, so such
+            # an address survives a credential push untouched.
+            entries = []
+            for i, e in enumerate(cfg.get("nw", {}).get("ins") or [{}]):
+                ip = e.get("ip") or [0, 0, 0, 0]
+                static = ".".join(str(o) for o in ip) if any(ip) else "dhcp"
+                entries.append(f"[{i}] ssid={e.get('ssid')!r} pskl={e.get('pskl')} addr={static}")
+            # Filesystem usage and uptime, because a config read-back proves less than it looks.
+            # GET /json/cfg serves the IN-MEMORY config, so it returns what we just pushed whether
+            # or not cfg.json was actually written. If LittleFS is full or unwritable the push
+            # "confirms", survives until the next real power cycle, and then reverts — which is
+            # exactly the observed behaviour. fs.u vs fs.t shows whether there is room to write,
+            # and uptime says whether the /reset we issued actually rebooted anything.
+            fs = info.get("fs") or {}
             report.append((ssid, "inspected",
-                           f"{mac} ver={info.get('ver')} ap.behav={apc.get('behav')} "
-                           f"ap.chan={apc.get('chan')} nw.ssid={ins.get('ssid')!r} "
-                           f"nw.pskl={ins.get('pskl')}"))
+                           f"{mac} ver={info.get('ver')} up={info.get('uptime')}s "
+                           f"fs={fs.get('u')}/{fs.get('t')}kB heap={info.get('freeheap')} "
+                           f"ap.behav={apc.get('behav')} ap.chan={apc.get('chan')} "
+                           f"nw={' '.join(entries)}"))
             return
         action, why = decide_action(mac, lan_macs, attempts, args.max_attempts)
         if action != "push":
@@ -503,6 +521,14 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
             if not confirm_cfg(DEVICE_IP, args.ssid, pskl, args.push_confirm_timeout):
                 report.append((ssid, "push-failed", "config did not persist (never read back)"))
                 return
+        # Settle before rebooting. The read-back above proves the values are in RAM, NOT that
+        # cfg.json was written: GET /json/cfg serves the in-memory config, so it answers correctly
+        # whether or not the file landed. WLED defers the actual write to a later main-loop pass,
+        # so confirming on the first poll and resetting immediately can still beat the write —
+        # which presents as a device that accepts the push, reads it back, and reverts to its old
+        # network on the next real power cycle. Observed on WLED-TOUCH-MATRIX, whose filesystem
+        # has plenty of free space (24/983kB), so this is a race and not a full disk.
+        time.sleep(args.write_settle)
         get_json(DEVICE_IP, "/reset")     # /json/cfg does not reboot on its own
         attempts[mac] = attempts.get(mac, 0) + 1
         report.append((ssid, "pushed", f"{mac} — rebooting"))
@@ -548,6 +574,9 @@ def main():
     ap.add_argument("--push-confirm-timeout", type=int, default=12,
                     help="seconds to wait for the pushed config to read back "
                          "before rebooting the device")
+    ap.add_argument("--write-settle", type=float, default=6.0,
+                    help="seconds to wait after the config reads back before rebooting, so the "
+                         "deferred cfg.json write can land (the read-back only proves RAM)")
     args = ap.parse_args()
 
     home_ssid = args.home_ssid or args.ssid

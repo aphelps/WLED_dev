@@ -190,6 +190,7 @@ class Args:
     # retry, give up), and at the 12s production default that is 24s of sleeping in a unit suite.
     ap_settle_timeout, push_confirm_timeout = 20, 1
     inspect = False
+    write_settle = 0.0
     join_retries, join_retry_delay = 1, 0.0
 
 
@@ -264,6 +265,26 @@ class TestProvisionOne(unittest.TestCase):
         plat, rep = FakePlatform(), []
         aj.provision_one(plat, net("WLED-AP"), Args(), set(), {}, rep)
         self.assertEqual(rep[0][1], "pushed")
+
+    def test_settles_after_confirming_before_it_reboots(self):
+        # The read-back proves the values are in RAM; GET /json/cfg serves the in-memory config
+        # either way. WLED writes cfg.json on a later main-loop pass, so confirming on the first
+        # poll and resetting at once can beat the write — the device then accepts the push, reads
+        # it back, and reverts on the next real power cycle. Assert the settle actually happens
+        # between the confirmation and the reboot.
+        self.info = {"brand": "WLED", "mac": ESP_MAC}
+        a = Args(); a.write_settle = 0.05
+        slept = []
+        real_sleep = aj.time.sleep
+        aj.time.sleep = lambda s: slept.append(s) or real_sleep(0)
+        try:
+            plat, rep = FakePlatform(), []
+            aj.provision_one(plat, net("WLED-AP"), a, set(), {}, rep)
+        finally:
+            aj.time.sleep = real_sleep
+        self.assertEqual(rep[0][1], "pushed")
+        self.assertIn(0.05, slept, "must wait for the deferred write before /reset")
+        self.assertIn("/reset", self.gets)
 
     def test_never_pushes_to_a_non_wled_ap(self):
         # The safety property. Open-AP probing means associating to networks that are not ours;
