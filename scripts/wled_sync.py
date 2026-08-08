@@ -27,6 +27,7 @@ Usage:
 import argparse
 import concurrent.futures
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -420,7 +421,6 @@ def main():
     scan = load_scanner()
 
     targets = list(args.host)
-    import ipaddress
     nets = [ipaddress.ip_network(s, strict=False) for s in args.subnet]
     if not args.host and not args.subnet:
         nets += scan.local_subnets()
