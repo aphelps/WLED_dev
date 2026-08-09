@@ -5,6 +5,7 @@
 #   make test-bridge# just the WLED rs485_bridge wire-format/decision tests
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
 #   make test-router# just the esp-now-router relay + leader-election tests
+#   make test-readme# verify README.md's claims against the source files
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
 #
@@ -14,9 +15,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-router test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-router test-readme test-ui test-all clean
 
-test: test-wled test-bridge test-libs test-router
+test: test-wled test-bridge test-libs test-router test-readme
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -112,6 +113,12 @@ test-router:
 	else \
 	  $(MAKE) --no-print-directory -C esp-now-router/tests test; \
 	fi
+
+# README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
+# so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
+test-readme:
+	@echo "== README claim checks =="
+	@python3 tools/check_readme.py
 
 # WLED web-UI builder test (Node/npm).
 test-ui:
