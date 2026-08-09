@@ -97,14 +97,14 @@ Building these from inside `WLED/` will not work.
 Everything here is host-compiled. No device, no flashing, no hardware.
 
 ```bash
-make            # or `make test` — all host suites plus the README checks
-make test-wled  # sensor-sync dispatch + the SPSC ring
-make test-bridge# HMTL wire format (run twice: native ABI and -fpack-struct=1)
-make test-libs  # ArduinoLibs RS485 receive path
-make test-router# mesh relay + leader election
-make test-readme# verify this README's claims against the source files
-make test-ui    # web-UI builder (needs Node)
-make test-all   # everything, including the UI test
+make               # or `make test` — all host suites plus the README checks
+make test-wled     # sensor-sync dispatch + the SPSC ring
+make test-bridge   # HMTL wire format, run twice: native ABI and packed
+make test-libs     # ArduinoLibs RS485 receive path
+make test-router   # mesh relay + leader election
+make test-readme   # verify this README's claims against the source files
+make test-ui       # web-UI builder (needs Node)
+make test-all      # everything, including the UI test
 ```
 
 One behaviour worth knowing: if a submodule is checked out at a revision that carries no tests, its

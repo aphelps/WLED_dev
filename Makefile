@@ -118,6 +118,8 @@ test-router:
 # so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
 test-readme:
 	@echo "== README claim checks =="
+	$(call require_submodule,WLED)
+	$(call require_submodule,esp-now-router)
 	@python3 tools/check_readme.py
 
 # WLED web-UI builder test (Node/npm).
