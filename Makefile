@@ -128,6 +128,22 @@ test-libs:
 # report success, and have cross-checked no embedded ABI at all — the same "a skipped suite reports
 # green" failure the STRICT machinery above exists to prevent. Today's CI runner has xtensa (the
 # espressif32 platform install brings it), so this passes; only avr-g++ is missing.
+# The sweep covers static_asserts — compile-time LAYOUT. It says nothing about the code that READS
+# those structs, and HMTL's behavioural suite (platformio/HMTL_Test, `pio test -e native`) ran under
+# no automation at all: HMTL has no .github/workflows, and this target reached only tests/layout/.
+# So HMTL#9's program_color() clamp — the narrowing, the zero-length rule, the stale-invocation
+# rejection — landed with tests that nothing invoked. Both pixel-width envs, because an
+# `#ifdef BIG_PIXELS` branch in a test body is dead source unless something compiles the flag.
+#
+# Delegated to HMTL's own `make test-native` rather than spelled out here, so the env list stays in
+# the repo that owns it. PIO defaults to the venv setup.sh builds; if that binary is absent this is
+# a skipped suite like any other, which STRICT=1 turns into a failure.
+#
+# HMTL's `test-python` is deliberately NOT wired in: it needs pytest, which is not in
+# WLED/requirements.txt, so adding it here would fail on a fresh CI venv. Adding pytest to the
+# pinned toolchain is a separate decision about this repo's dependency set — filed, not smuggled in.
+PIO ?= ./.venv/bin/pio
+
 test-hmtl:
 	@echo "== HMTL cross-ABI wire layout sweep =="
 	$(call require_submodule,HMTL)
@@ -138,6 +154,17 @@ test-hmtl:
 	    REQUIRE_TOOLCHAINS=$(REQUIRE_TOOLCHAINS) REQUIRE_ANY_REAL=$(require_any_real) && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout packed-access && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout negative || exit 1; \
+	fi
+	@echo "== HMTL native behaviour tests (both pixel widths) =="
+	@pio_bin=""; \
+	if [ -x "$(PIO)" ]; then pio_bin="$(abspath $(PIO))"; \
+	else pio_bin="$$(command -v $(notdir $(PIO)) 2>/dev/null || true)"; fi; \
+	if [ ! -f HMTL/platformio/HMTL_Test/platformio.ini ]; then \
+	  $(call missing_tests,no HMTL_Test/ at the pinned HMTL revision); \
+	elif [ -z "$$pio_bin" ]; then \
+	  $(call missing_tests,pio not found at $(PIO) nor on PATH — run ./setup.sh); \
+	else \
+	  $(MAKE) --no-print-directory -C HMTL test-native PIO="$$pio_bin" || exit 1; \
 	fi
 
 # esp-now-router: the relay + leader-election host tests (delegates to that repo's own Makefile,
