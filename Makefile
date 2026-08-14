@@ -132,12 +132,16 @@ test-libs:
 # those structs, and HMTL's behavioural suite (platformio/HMTL_Test, `pio test -e native`) ran under
 # no automation at all: HMTL has no .github/workflows, and this target reached only tests/layout/.
 # So HMTL#9's program_color() clamp — the narrowing, the zero-length rule, the stale-invocation
-# rejection — landed with tests that nothing invoked. Both pixel-width envs, because an
-# `#ifdef BIG_PIXELS` branch in a test body is dead source unless something compiles the flag.
+# rejection — landed with tests that nothing invoked.
 #
 # Delegated to HMTL's own `make test-native` rather than spelled out here, so the env list stays in
-# the repo that owns it. PIO defaults to the venv setup.sh builds; if that binary is absent this is
-# a skipped suite like any other, which STRICT=1 turns into a failure.
+# the repo that owns it. Which is why this comment does NOT promise which envs run: HMTL#9 makes it
+# both pixel widths (an `#ifdef BIG_PIXELS` branch in a test body is dead source unless something
+# compiles the flag), but an older HMTL pin runs whatever IT lists, and a promise made here would
+# quietly become false. HMTL's test-native prints what it actually ran.
+#
+# PIO defaults to the venv setup.sh builds and falls back to PATH; if neither resolves this is a
+# skipped suite like any other, which STRICT=1 turns into a failure.
 #
 # HMTL's `test-python` is deliberately NOT wired in: it needs pytest, which is not in
 # WLED/requirements.txt, so adding it here would fail on a fresh CI venv. Adding pytest to the
