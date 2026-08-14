@@ -155,7 +155,9 @@ test-hmtl:
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout packed-access && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout negative || exit 1; \
 	fi
-	@echo "== HMTL native behaviour tests (both pixel widths) =="
+	@# No "(both pixel widths)" here: the env list lives in HMTL's own Makefile, so an older HMTL
+	@# pin can run one env while this banner claims two. HMTL's test-native prints what it ran.
+	@echo "== HMTL native behaviour tests =="
 	@pio_bin=""; \
 	if [ -x "$(PIO)" ]; then pio_bin="$(abspath $(PIO))"; \
 	else pio_bin="$$(command -v $(notdir $(PIO)) 2>/dev/null || true)"; fi; \
