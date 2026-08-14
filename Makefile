@@ -4,6 +4,7 @@
 #   make test-wled  # just the WLED ampworks sensor-sync tests
 #   make test-bridge# just the WLED rs485_bridge wire-format/decision tests
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
+#   make test-hmtl  # just the HMTL cross-ABI wire-layout sweep + its negative control
 #   make test-router# just the esp-now-router relay + leader-election tests
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
@@ -14,9 +15,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-router test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-ui test-all clean
 
-test: test-wled test-bridge test-libs test-router
+test: test-wled test-bridge test-libs test-hmtl test-router
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -47,6 +48,13 @@ endef
 # them `STRICT=OFF` would be strict and report "ERROR: … (STRICT=OFF — a skipped suite is a failure)",
 # which reads as a contradiction to whoever just typed OFF.
 STRICT ?=
+REQUIRE_TOOLCHAINS ?=
+# STRICT implies "at least one real embedded toolchain must have run" — see test-hmtl below.
+ifeq ($(filter-out 0 no No NO false False FALSE off Off OFF,$(strip $(STRICT))),)
+require_any_real :=
+else
+require_any_real := 1
+endif
 ifeq ($(filter-out 0 no No NO false False FALSE off Off OFF,$(strip $(STRICT))),)
 missing_tests = echo "-- skipped: $(1) --"
 else
@@ -101,6 +109,37 @@ test-libs:
 	  $(MAKE) --no-print-directory -C ArduinoLibs/test test; \
 	fi
 
+# HMTL: the cross-ABI layout sweep over the wire headers, plus the negative control that proves
+# the asserts can fail. Delegates to HMTL/tests/layout/, which owns the toolchain discovery.
+#
+# This is here because nothing else reaches those asserts from CI. HMTL has its own `make test`,
+# but this repo has never invoked it, and HMTL_Module's firmware envs resolve their libraries from
+# a machine-local Arduino directory rather than from the HMTL checkout — verified, not assumed: a
+# deliberately impossible static_assert in HMTL/Libraries/HMTLMessaging/HMTLPrograms.h leaves
+# `make -C HMTL test-simavr` green.
+#
+# Without REQUIRE_TOOLCHAINS the sweep runs whatever compilers exist and prints a COVERAGE line
+# naming what it skipped, so a host-only run cannot be read as a full one. On a runner with
+# avr-g++ and xtensa-esp32-elf-g++ installed, pass REQUIRE_TOOLCHAINS=1 to demand all four ABIs.
+#
+# STRICT=1 additionally sets REQUIRE_ANY_REAL, which is the weaker guarantee that matters most: it
+# does not demand a specific toolchain, only that the sweep touched at least ONE real embedded ABI.
+# Without it, `make test STRICT=1` on a runner with neither toolchain would compile the host pair,
+# report success, and have cross-checked no embedded ABI at all — the same "a skipped suite reports
+# green" failure the STRICT machinery above exists to prevent. Today's CI runner has xtensa (the
+# espressif32 platform install brings it), so this passes; only avr-g++ is missing.
+test-hmtl:
+	@echo "== HMTL cross-ABI wire layout sweep =="
+	$(call require_submodule,HMTL)
+	@if [ ! -f HMTL/tests/layout/Makefile ]; then \
+	  $(call missing_tests,no tests/layout/ at the pinned HMTL revision); \
+	else \
+	  $(MAKE) --no-print-directory -C HMTL/tests/layout \
+	    REQUIRE_TOOLCHAINS=$(REQUIRE_TOOLCHAINS) REQUIRE_ANY_REAL=$(require_any_real) && \
+	  $(MAKE) --no-print-directory -C HMTL/tests/layout packed-access && \
+	  $(MAKE) --no-print-directory -C HMTL/tests/layout negative || exit 1; \
+	fi
+
 # esp-now-router: the relay + leader-election host tests (delegates to that repo's own Makefile,
 # which knows the -I paths into the WLED submodule). `pio test -e native` is the idiomatic
 # alternative from inside the esp-now-router dir.
@@ -123,5 +162,6 @@ test-all: test test-ui
 clean:
 	@$(MAKE) --no-print-directory -C esp-now-router/tests clean 2>/dev/null || true
 	@$(MAKE) --no-print-directory -C ArduinoLibs/test clean 2>/dev/null || true
+	@$(MAKE) --no-print-directory -C HMTL/tests/layout clean 2>/dev/null || true
 	@rm -f /tmp/wled_sensor_sync_test /tmp/wled_sensor_sync_ring_test
 	@rm -f /tmp/wled_rs485_bridge_test /tmp/wled_rs485_bridge_test_avr
