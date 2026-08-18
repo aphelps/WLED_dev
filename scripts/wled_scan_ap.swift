@@ -42,6 +42,7 @@ do {
         switch n.wlanChannel?.channelBand {
         case .some(.band2GHz): band = 2
         case .some(.band5GHz): band = 5
+        case .some(.band6GHz): band = 6
         default: band = ch > 0 && ch <= 14 ? 2 : -1
         }
         out.append([

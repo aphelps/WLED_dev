@@ -139,6 +139,48 @@ class TestDecision(unittest.TestCase):
         action, _ = aj.decide_action(ESP_MAC, set(), {ESP_MAC: 2}, 2)
         self.assertEqual(action, "give-up")
 
+    def test_waits_inside_the_push_grace_instead_of_repushing(self):
+        # A just-pushed device is mid-reboot; its AP staying visible is normal, and the SSID must
+        # stay eligible so a SECOND device broadcasting the same `WLED-AP` gets its turn.
+        action, why = aj.decide_action(ESP_MAC, set(), {ESP_MAC: 1}, 2,
+                                       last_push={ESP_MAC: 1000.0}, now=1000.0 + 5)
+        self.assertEqual(action, "waiting")
+        self.assertIn("waiting", why)
+
+    def test_repushes_after_the_grace_and_can_reach_give_up(self):
+        # Still broadcasting well past the grace: the push evidently did not stick. It gets pushed
+        # again — which is what makes `give-up` reachable outside a unit test at all.
+        late = 1000.0 + aj.PUSH_GRACE_S + 1
+        action, _ = aj.decide_action(ESP_MAC, set(), {ESP_MAC: 1}, 2,
+                                     last_push={ESP_MAC: 1000.0}, now=late)
+        self.assertEqual(action, "push")
+        action, _ = aj.decide_action(ESP_MAC, set(), {ESP_MAC: 2}, 2,
+                                     last_push={ESP_MAC: 1000.0}, now=late)
+        self.assertEqual(action, "give-up")
+
+    def test_a_different_mac_behind_the_same_ssid_is_pushed(self):
+        # The whole point of per-MAC finality: device B is not penalised for device A's push.
+        action, _ = aj.decide_action("244cab000001", set(), {ESP_MAC: 1}, 2,
+                                     last_push={ESP_MAC: 1000.0}, now=1000.0 + 5)
+        self.assertEqual(action, "push")
+
+
+class TestWatchdogHopBudget(unittest.TestCase):
+    def test_covers_one_worst_case_hop_plus_restore(self):
+        # One hop: every join retry burning its full connect + DHCP + delay, both confirm polls,
+        # the write settle, and the flat restore allowance.
+        class A:
+            join_retries, connect_timeout, ap_settle_timeout, join_retry_delay = 4, 30, 20, 4.0
+            push_confirm_timeout, write_settle = 12, 6.0
+        expect = 4 * (30 + 20 + 4.0) + 2 * 12 + 6.0 + 180
+        self.assertEqual(aj.watchdog_hop_budget(A), int(expect))
+
+    def test_join_retries_floor_of_one(self):
+        class A:
+            join_retries, connect_timeout, ap_settle_timeout, join_retry_delay = 0, 30, 20, 4.0
+            push_confirm_timeout, write_settle = 12, 6.0
+        self.assertEqual(aj.watchdog_hop_budget(A), int((30 + 20 + 4.0) + 24 + 6.0 + 180))
+
 
 class TestConfigBody(unittest.TestCase):
     def test_uses_json_cfg_shape_not_the_settings_form(self):

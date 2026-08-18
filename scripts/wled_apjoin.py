@@ -154,17 +154,40 @@ def identify(info):
     return True, mac, "WLED device"
 
 
-def decide_action(mac, lan_macs, attempts, max_attempts):
+def watchdog_hop_budget(args):
+    """Worst case for ONE candidate: every join retry timing out with a full DHCP wait, the push
+    confirm polled twice, plus a flat allowance for identify retries and the finally-restore
+    (two join rounds with 45s online-waits ≈ 150s)."""
+    joins = max(1, args.join_retries) * (args.connect_timeout + args.ap_settle_timeout
+                                         + args.join_retry_delay)
+    return int(joins + 2 * args.push_confirm_timeout + args.write_settle + 180)
+
+
+# A push is followed by a device reboot; the AP staying visible inside this window is normal
+# (mid-reboot), not evidence the push failed. Only after the grace has passed does a
+# still-broadcasting device earn another push (and, eventually, give-up).
+PUSH_GRACE_S = 90
+
+
+def decide_action(mac, lan_macs, attempts, max_attempts, last_push=None, now=None):
     """What to do with an identified device. Returns (action, reason).
 
     Adam's rule: skip only if it is on the CURRENT LAN; a device on a *different* network gets
     re-pointed onto this one. `lan_macs` therefore has to be a complete scan of the current LAN —
     if it is incomplete, working devices get needlessly rewritten.
+
+    Finality is per-DEVICE (MAC), not per-SSID: two stock devices both broadcast `WLED-AP`, so
+    retiring the SSID after the first push would strand the second. A MAC pushed within
+    PUSH_GRACE_S gets "waiting" (non-terminal — the SSID stays eligible for the *other* device);
+    one still broadcasting after the grace gets pushed again until `max_attempts` retires it.
     """
     if mac and mac.lower() in {m.lower() for m in lan_macs}:
         return "skip", "already on this LAN"
     if attempts.get(mac, 0) >= max_attempts:
         return "give-up", f"already tried {max_attempts}x without it appearing"
+    since = None if not last_push or mac not in last_push else (now or time.time()) - last_push[mac]
+    if since is not None and since < PUSH_GRACE_S:
+        return "waiting", f"pushed {int(since)}s ago — waiting for it to appear"
     return "push", "not on this LAN"
 
 
@@ -421,7 +444,7 @@ ESP32 (handled separately by esp-now-router, NOT by porting this):
 
 
 # --- orchestration ------------------------------------------------------------------------------
-def provision_one(plat, net, args, lan_macs, attempts, report):
+def provision_one(plat, net, args, lan_macs, attempts, report, last_push=None):
     """Join one AP, identify it, maybe push credentials, leave. Returns after restoring nothing —
     the caller owns restoration, so a failure here can never skip it."""
     ssid = net["ssid"]
@@ -496,7 +519,7 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
                            f"ap.behav={apc.get('behav')} ap.chan={apc.get('chan')} "
                            f"nw={' '.join(entries)}"))
             return
-        action, why = decide_action(mac, lan_macs, attempts, args.max_attempts)
+        action, why = decide_action(mac, lan_macs, attempts, args.max_attempts, last_push)
         if action != "push":
             report.append((ssid, action, f"{mac} — {why}"))
             return
@@ -531,6 +554,8 @@ def provision_one(plat, net, args, lan_macs, attempts, report):
         time.sleep(args.write_settle)
         get_json(DEVICE_IP, "/reset")     # /json/cfg does not reboot on its own
         attempts[mac] = attempts.get(mac, 0) + 1
+        if last_push is not None:
+            last_push[mac] = time.time()
         report.append((ssid, "pushed", f"{mac} — rebooting"))
     finally:
         plat.forget(ssid)
@@ -583,15 +608,15 @@ def main():
     plat = MacPlatform(args.iface)
     patterns = DEFAULT_PATTERNS + args.ssid_pattern
 
-    # The watchdog is armed once, before the loop. If it can fire while the loop is still working,
-    # it force-rejoins home mid-adoption and the run silently does half its job. Raise it rather
-    # than letting the two settings quietly contradict each other — but say so, because this is a
-    # safety parameter and moving one behind the user's back is its own kind of surprise.
-    needed = args.adopt_deadline + 120
-    if args.adopt_deadline and args.safety_timeout < needed:
-        print(f"note: raising --safety-timeout {args.safety_timeout}s → {needed}s so the watchdog "
-              f"cannot fire during a {args.adopt_deadline}s adoption window", file=sys.stderr)
-        args.safety_timeout = needed
+    # The watchdog is re-armed per hop (see the adopt loop), so its budget only has to cover ONE
+    # candidate — join retries, identify/push/confirm, and the two-round restore in `finally` —
+    # not the whole adoption window. Sizing it off the actual per-hop knobs keeps it meaningful:
+    # a single run-wide budget was either undersized (fired mid-run, force-rejoining home and
+    # mislabelling later joins) or so large it no longer protected anything.
+    hop_budget = max(args.safety_timeout, watchdog_hop_budget(args))
+    if hop_budget != args.safety_timeout:
+        print(f"note: watchdog per-hop budget {hop_budget}s (--safety-timeout {args.safety_timeout}s "
+              f"is smaller than one worst-case hop plus restore)", file=sys.stderr)
 
     # Pre-flight: know what is already here BEFORE touching the radio. This is a correctness input
     # — a device found now is left alone rather than needlessly rewritten.
@@ -632,15 +657,27 @@ def main():
     if err:
         print(f"error: {err}", file=sys.stderr)
         return 2
+    scan_errs = 0
     while not candidates and time.time() < deadline:
         print(f"  …no candidate APs yet, waiting ({int(deadline - time.time())}s left)",
               file=sys.stderr)
         time.sleep(args.rescan_interval)
         candidates, err = find_candidates()
         if err:
+            # A scan that starts failing persistently (swift gone, Location Services revoked,
+            # Wi-Fi powered off) must not decay into "No candidate APs found." exit 0.
+            scan_errs += 1
+            if scan_errs >= 3:
+                print(f"error: scans failing persistently: {err}", file=sys.stderr)
+                return 2
             candidates = []
+        else:
+            scan_errs = 0
 
     if not candidates:
+        if err:
+            print(f"error: last scan failed: {err}", file=sys.stderr)
+            return 2
         print("No candidate APs found.", file=sys.stderr)
         return 0
 
@@ -665,21 +702,27 @@ def main():
 
     # Detached watchdog: survives SIGINT to this process group and even SIGKILL of this process,
     # which is the case a plain background child does not cover.
-    dog = plat.watchdog(home_ssid, args.home_password, args.safety_timeout)
-    attempts, report = {}, []
+    dog = plat.watchdog(home_ssid, args.home_password, hop_budget)
+    attempts, last_push, report = {}, {}, []
     # A verdict that says something about the DEVICE is final; one that says something about the
     # RADIO is not. `join-failed` is the flapping case — the AP was there during the scan and gone
     # a second later — so that SSID stays eligible and we come back for it. Without this split the
     # run either gives up on a device that is merely mid-retry, or re-pushes to one it already did.
-    TERMINAL = {"pushed", "not-wled", "skip", "give-up", "push-failed", "inspected"}
-    done, empty_rounds = set(), 0
+    # `pushed` is deliberately NOT here: it retires a MAC (via decide_action's grace/attempts),
+    # never the SSID — a second stock device broadcasts the same `WLED-AP` and still needs a turn.
+    TERMINAL = {"not-wled", "skip", "give-up", "push-failed", "inspected"}
+    done, empty_rounds, scan_broken = set(), 0, False
     try:
         while True:
             for n, _why in candidates:
                 if n["ssid"] in done:
                     continue
+                # Fresh watchdog per hop: one that has fired (or been consumed by an earlier
+                # hop's slow join) protects nothing for the hops after it.
+                dog.terminate()
+                dog = plat.watchdog(home_ssid, args.home_password, hop_budget)
                 mark = len(report)
-                provision_one(plat, n, args, lan_macs, attempts, report)
+                provision_one(plat, n, args, lan_macs, attempts, report, last_push)
                 if any(r[1] in TERMINAL for r in report[mark:]):
                     done.add(n["ssid"])
 
@@ -690,14 +733,22 @@ def main():
             # very little when the APs are known to blink in and out.
             candidates, serr = find_candidates(exclude_ssids=done)
             if serr:
+                scan_errs += 1
+                if scan_errs >= 3:
+                    print(f"WARNING: scans failing persistently ({serr}); "
+                          f"stopping adoption early.", file=sys.stderr)
+                    scan_broken = True
+                    break
                 candidates = []
+            else:
+                scan_errs = 0
             if candidates:
                 empty_rounds = 0
                 print(f"  …{len(candidates)} AP(s) back in range: "
                       f"{', '.join(c[0]['ssid'] for c in candidates)}", file=sys.stderr)
             else:
                 empty_rounds += 1
-                if empty_rounds >= 2 and done:
+                if empty_rounds >= 2 and (done or last_push):
                     break
                 remaining = int(deadline - time.time())
                 print(f"  …waiting for APs to reappear ({remaining}s left)", file=sys.stderr)
@@ -745,6 +796,8 @@ def main():
         print(f"{ssid:<28}  {result:<14}  {detail}")
 
     bad = [r for r in report if r[1] in ("join-failed", "push-failed", "never-appeared")]
+    if scan_broken:
+        return 2
     return 1 if bad or not back else 0
 
 
