@@ -154,19 +154,24 @@ def identify(info):
     return True, mac, "WLED device"
 
 
-AP_SUBNET = "4.3.2."     # every WLED AP leases its client from this subnet
+AP_SUBNET = "4.3.2."         # every WLED AP leases its client from this subnet
+ESP_AP_SUBNET = "192.168.4." # ESP-IDF default softAP lease — Tasmota/ESPHome setup-mode APs
 
 
-def ensure_off_device_ap(plat, home_ssid, home_password, timeout):
+def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None):
     """Known radio state between hops. A host still associated to a device AP (after any
     no-reboot verdict — nothing in provision_one disassociates, forget() only edits the
     preferred list) does two kinds of damage: WLED holds its own join retry until the AP client
     count hits zero, so the grace window spends itself preventing the join it is waiting for;
-    and the next hop starts with before_addr on the AP subnet, which every WLED AP leases
-    again, so the address-change check reports "never left" against a join that worked.
-    Returns True once the host no longer holds an AP-subnet address."""
+    and the next hop starts with a before_addr the next AP leases again, so the address-change
+    check reports "never left" against a join that worked. Not WLED-specific: the open-probe
+    also visits stranger ESP APs, which lease from ESP-IDF's default 192.168.4.x — so the test
+    is "demonstrably back on the pre-loop home address", not "off WLED's subnet". Without a home
+    reference, only a known device-AP subnet forces the rejoin. Returns True once off."""
     addr = plat.current_address()
-    if not addr or not addr.startswith(AP_SUBNET):
+    if addr and addr == home_addr:
+        return True
+    if addr and not home_addr and not addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
         return True
     plat.join(home_ssid, home_password, timeout)
     return bool(plat.wait_online(30))
@@ -724,6 +729,9 @@ def main():
     # Detached watchdog: survives SIGINT to this process group and even SIGKILL of this process,
     # which is the case a plain background child does not cover.
     dog = plat.watchdog(home_ssid, args.home_password, hop_budget)
+    # The between-hop detach compares against this, not against a subnet list: it is captured
+    # while the host is still on its own network (the LAN pre-flight just ran from it).
+    home_addr = plat.current_address()
     attempts, last_push, report = {}, {}, []
     # A verdict that says something about the DEVICE is final; one that says something about the
     # RADIO is not. `join-failed` is the flapping case — the AP was there during the scan and gone
@@ -747,7 +755,7 @@ def main():
                 if any(r[1] in TERMINAL for r in report[mark:]):
                     done.add(n["ssid"])
                 if not ensure_off_device_ap(plat, home_ssid, args.home_password,
-                                            args.connect_timeout):
+                                            args.connect_timeout, home_addr):
                     print("WARNING: could not detach from the device AP; "
                           "stopping adoption early.", file=sys.stderr)
                     radio_stuck = True

@@ -198,6 +198,31 @@ class TestEnsureOffDeviceAp(unittest.TestCase):
         self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
         self.assertEqual(plat.joined, ["HomeNet"])
 
+    def test_rejoins_home_from_a_stranger_esp_ap(self):
+        # Tasmota/ESPHome setup-mode APs (open-probe targets) lease ESP-IDF's default
+        # 192.168.4.x — the same trap as WLED's subnet, and why the gate is not WLED-specific.
+        plat = self.Fake("192.168.4.2")
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        self.assertEqual(plat.joined, ["HomeNet"])
+
+    def test_home_address_is_the_reference_when_known(self):
+        # An unrecognised subnet still forces the rejoin when it is not the pre-loop home
+        # address — some AP handing out 10.x must not be mistaken for "back home".
+        plat = self.Fake("10.0.0.7")
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                                home_addr="192.168.1.26"))
+        self.assertEqual(plat.joined, ["HomeNet"])
+        plat = self.Fake("192.168.1.26")
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                                home_addr="192.168.1.26"))
+        self.assertEqual(plat.joined, [])
+
+    def test_no_lease_at_all_rejoins_home(self):
+        plat = self.Fake(None)
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                                home_addr="192.168.1.26"))
+        self.assertEqual(plat.joined, ["HomeNet"])
+
     def test_reports_failure_when_it_cannot_get_off(self):
         plat = self.Fake("4.3.2.2", online=False)
         self.assertFalse(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
