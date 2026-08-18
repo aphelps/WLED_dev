@@ -77,8 +77,8 @@ override discovery.
 | `--workers` | 16 | Concurrent devices to apply to. |
 | `--discovery-workers` | 64 | Concurrent probes while sweeping. |
 
-Exit status is `0` only when every device found was updated; any failure exits `1`, so it is safe
-to use in a script.
+Exit status is `0` only when every device found was updated; any failure exits `1` (usage errors,
+including an out-of-range `--speed`, exit `2`), so it is safe to use in a script.
 
 ---
 
@@ -89,7 +89,9 @@ make test-sync      # just these
 make test           # everything in the repo
 ```
 
-Pure logic — no network. The assertions worth knowing about cover the ordering rule (transitivity
-and antisymmetry across the full `uint32` range, and convergence under all six arrival orders of
-three commands) and that the broadcast-suppression flag is present on every request, since without
-it a synced device re-broadcasts to the fleet and undoes the run.
+No hardware and no external network — the cross-version tests run against loopback HTTP stubs
+serving captured 16.0.1 and 0.14.4 name tables. The assertions worth knowing about: the same
+effect *name* resolves to a different index per firmware version (the reason the tool syncs by
+name at all), the broadcast-suppression flag `udpn.nn` is on every request — without it a synced
+device re-broadcasts raw indices to the fleet and undoes the run — `--dry-run` writes nothing,
+and verify-after-apply catches a deliberately wrong application.
