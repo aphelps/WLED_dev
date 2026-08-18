@@ -337,8 +337,8 @@ class MacPlatform:
         addr = (ip.stdout or "").strip()
         if not addr:
             return False
-        if addr.startswith("4.3.2."):
-            return False          # still on a WLED SoftAP
+        if addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+            return False          # still on a device SoftAP (WLED 4.3.2.x / ESP-IDF 192.168.4.x)
         if addr.startswith("169.254."):
             return False          # link-local: associated but no DHCP
         return True
@@ -762,9 +762,13 @@ def main():
                     break
                 # Refresh the reference after a successful detach: a mid-run DHCP lease change
                 # would otherwise fail the equality check on every later hop and pay a
-                # redundant join + wait_online each time.
+                # redundant join + wait_online each time. Never latch a device-AP lease as
+                # "home" — a transiently wrong detach verdict would otherwise make the
+                # equality fast-path skip every later rejoin.
                 if home_addr:
-                    home_addr = plat.current_address() or home_addr
+                    fresh = plat.current_address()
+                    if fresh and not fresh.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+                        home_addr = fresh
             if radio_stuck:
                 break
 

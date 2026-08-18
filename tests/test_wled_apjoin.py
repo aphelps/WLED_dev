@@ -228,6 +228,33 @@ class TestEnsureOffDeviceAp(unittest.TestCase):
         self.assertFalse(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
 
 
+class TestIsConnected(unittest.TestCase):
+    """is_connected is what wait_online — and therefore both the detach gate's verdict and the
+    final watchdog disarm — trusts. An address it wrongly accepts becomes a latched lie."""
+
+    def _with_addr(self, addr):
+        import types
+        from unittest import mock
+        plat = aj.MacPlatform("en0")
+        fake = types.SimpleNamespace(stdout=(addr or "") + "\n", returncode=0)
+        with mock.patch.object(aj.subprocess, "run", return_value=fake):
+            return plat.is_connected()
+
+    def test_rejects_both_device_ap_subnets(self):
+        # 192.168.4.x here is the latching case: a rejoin that failed while still on a stranger
+        # ESP AP must not read as "online", or the home-address refresh records that lease and
+        # the equality fast-path skips every later rejoin.
+        self.assertFalse(self._with_addr("4.3.2.2"))
+        self.assertFalse(self._with_addr("192.168.4.2"))
+
+    def test_rejects_link_local_and_empty(self):
+        self.assertFalse(self._with_addr("169.254.10.9"))
+        self.assertFalse(self._with_addr(""))
+
+    def test_accepts_a_real_lease(self):
+        self.assertTrue(self._with_addr("192.168.1.26"))
+
+
 class TestWatchdogHopBudget(unittest.TestCase):
     def test_covers_one_worst_case_hop_plus_restore(self):
         # One hop: every join retry burning its full connect + DHCP + delay, both confirm polls,
