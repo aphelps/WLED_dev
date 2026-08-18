@@ -173,7 +173,7 @@ def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None
     addr = plat.current_address()
     if addr and addr == home_addr:
         return True
-    if addr and not home_addr and not addr.startswith(DEVICE_AP_SUBNETS):
+    if addr and not home_addr and not addr.startswith(NOT_HOME):
         return True
     plat.join(home_ssid, home_password, timeout)
     return bool(plat.wait_online(30))
@@ -775,13 +775,14 @@ def main():
                     break
                 # Refresh the reference after a successful detach: a mid-run DHCP lease change
                 # would otherwise fail the equality check on every later hop and pay a
-                # redundant join + wait_online each time. Never latch a device-AP lease as
-                # "home" — a transiently wrong detach verdict would otherwise make the
-                # equality fast-path skip every later rejoin.
-                if home_addr:
-                    fresh = plat.current_address()
-                    if fresh and not fresh.startswith(NOT_HOME):
-                        home_addr = fresh
+                # redundant join + wait_online each time. Never latch a device-AP lease or
+                # link-local as "home" — a transiently wrong detach verdict would otherwise
+                # make the equality fast-path skip every later rejoin. Unconditional (not
+                # gated on home_addr) so a reference blanked at launch can be acquired once a
+                # real lease shows up.
+                fresh = plat.current_address()
+                if fresh and not fresh.startswith(NOT_HOME):
+                    home_addr = fresh
             if radio_stuck:
                 break
 
