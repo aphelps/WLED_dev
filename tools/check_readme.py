@@ -67,9 +67,12 @@ def main():
     # is a syntax error, and so is `done`), while a broken `\`-continuation parses fine as two
     # independent halves. The block is the unit a reader pastes.
     makefile = read("Makefile")
-    make_targets = sorted(set(re.findall(r"^([A-Za-z][\w.-]*):", makefile, re.M)), key=len,
-                          reverse=True)
-    glued = re.compile(r"\b(" + "|".join(re.escape(tg) for tg in make_targets) + r")#")
+    make_targets = set(re.findall(r"^([A-Za-z][\w.-]*):", makefile, re.M))
+    # The env names the README itself tables (parsed properly further down) are glued-#
+    # hazards too: `pio run -e ampworks# note` invokes the nonexistent env `ampworks#`.
+    env_names = set(re.findall(r"^\| `([a-z0-9_.-]+)` \|", readme, re.M))
+    glued_tokens = sorted(make_targets | env_names, key=len, reverse=True)
+    glued = re.compile(r"\b(" + "|".join(re.escape(tg) for tg in glued_tokens) + r")#")
     for block in re.findall(r"```bash\n(.*?)```", readme, re.S):
         first = next((ln.strip() for ln in block.splitlines() if ln.strip()), "")
         ok = subprocess.run(["bash", "-n"], input=block, text=True,
@@ -81,9 +84,9 @@ def main():
             # bash -n only catches SYNTAX errors. `make test-libs# note` parses fine as a command
             # yet invokes the target `test-libs#`, which does not exist. Matching bare `\S#`
             # false-positives on URL fragments and quoted strings, so only fire when the token
-            # fused to the `#` is a real make target.
+            # fused to the `#` is one the README trades in: a make target or a tabled env name.
             check(not glued.search(line),
-                  f"'#' is separated from the make target: {line.strip()[:60]}")
+                  f"'#' is separated from the command token: {line.strip()[:60]}")
 
     print("no instruction to consult CLAUDE.md for a setup step")
     check(not re.search(r"see CLAUDE|refer to CLAUDE|per CLAUDE", readme, re.I),
