@@ -169,14 +169,26 @@ def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None
     check reports "never left" against a join that worked. Not WLED-specific: the open-probe
     also visits stranger ESP APs, which lease from ESP-IDF's default 192.168.4.x — so the test
     is "demonstrably back on the pre-loop home address", not "off WLED's subnet". Without a home
-    reference, only a known device-AP subnet forces the rejoin. Returns True once off."""
+    reference, only a known device-AP subnet forces the rejoin.
+
+    Returns (ok, home_addr). The reference is updated ONLY from a lease observed after a
+    confirmed rejoin home — never from whatever the host happens to hold: a stranger open AP
+    can lease a perfectly routable 10.x, and latching that as "home" would let the equality
+    fast-path report a stranded host as home for the rest of the run. This owns the reference
+    refresh (a mid-run DHCP change costs one redundant rejoin, then re-latches) so the caller
+    cannot latch an unverified address."""
     addr = plat.current_address()
     if addr and addr == home_addr:
-        return True
+        return True, home_addr
     if addr and not home_addr and not addr.startswith(NOT_HOME):
-        return True
+        return True, home_addr
     plat.join(home_ssid, home_password, timeout)
-    return bool(plat.wait_online(30))
+    if not plat.wait_online(30):
+        return False, home_addr
+    fresh = plat.current_address()
+    if fresh and not fresh.startswith(NOT_HOME):
+        home_addr = fresh
+    return True, home_addr
 
 
 def watchdog_hop_budget(args):
@@ -767,22 +779,13 @@ def main():
                 provision_one(plat, n, args, lan_macs, attempts, report, last_push)
                 if any(r[1] in TERMINAL for r in report[mark:]):
                     done.add(n["ssid"])
-                if not ensure_off_device_ap(plat, home_ssid, args.home_password,
-                                            args.connect_timeout, home_addr):
+                off, home_addr = ensure_off_device_ap(plat, home_ssid, args.home_password,
+                                                      args.connect_timeout, home_addr)
+                if not off:
                     print("WARNING: could not detach from the device AP; "
                           "stopping adoption early.", file=sys.stderr)
                     radio_stuck = True
                     break
-                # Refresh the reference after a successful detach: a mid-run DHCP lease change
-                # would otherwise fail the equality check on every later hop and pay a
-                # redundant join + wait_online each time. Never latch a device-AP lease or
-                # link-local as "home" — a transiently wrong detach verdict would otherwise
-                # make the equality fast-path skip every later rejoin. Unconditional (not
-                # gated on home_addr) so a reference blanked at launch can be acquired once a
-                # real lease shows up.
-                fresh = plat.current_address()
-                if fresh and not fresh.startswith(NOT_HOME):
-                    home_addr = fresh
             if radio_stuck:
                 break
 

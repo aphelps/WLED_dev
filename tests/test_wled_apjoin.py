@@ -190,42 +190,77 @@ class TestEnsureOffDeviceAp(unittest.TestCase):
 
     def test_no_op_when_not_on_the_ap_subnet(self):
         plat = self.Fake("192.168.1.26")
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, [], "must not touch the radio when already off the AP")
 
     def test_rejoins_home_when_still_holding_an_ap_lease(self):
         plat = self.Fake("4.3.2.2")
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, ["HomeNet"])
 
     def test_rejoins_home_from_a_stranger_esp_ap(self):
         # Tasmota/ESPHome setup-mode APs (open-probe targets) lease ESP-IDF's default
         # 192.168.4.x — the same trap as WLED's subnet, and why the gate is not WLED-specific.
         plat = self.Fake("192.168.4.2")
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, ["HomeNet"])
 
     def test_home_address_is_the_reference_when_known(self):
         # An unrecognised subnet still forces the rejoin when it is not the pre-loop home
         # address — some AP handing out 10.x must not be mistaken for "back home".
         plat = self.Fake("10.0.0.7")
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
-                                                home_addr="192.168.1.26"))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                        home_addr="192.168.1.26")
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, ["HomeNet"])
         plat = self.Fake("192.168.1.26")
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
-                                                home_addr="192.168.1.26"))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                        home_addr="192.168.1.26")
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, [])
 
     def test_no_lease_at_all_rejoins_home(self):
         plat = self.Fake(None)
-        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
-                                                home_addr="192.168.1.26"))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                        home_addr="192.168.1.26")
+        self.assertTrue(ok)
         self.assertEqual(plat.joined, ["HomeNet"])
+
+    def test_link_local_with_no_reference_forces_the_rejoin(self):
+        # Associated with DHCP still pending — precisely the state right after leaving a device
+        # AP. With no home reference this must NOT pass as "detached and home".
+        plat = self.Fake("169.254.10.9")
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
+        self.assertEqual(plat.joined, ["HomeNet"])
+
+    def test_never_latches_a_stranger_routable_lease_as_home(self):
+        # No reference and a routable stranger lease (10.x): passes as off-AP, but must not
+        # become the home reference — a later equality match against it would report a
+        # stranded host as home.
+        plat = self.Fake("10.0.0.7")
+        ok, ref = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
+        self.assertIsNone(ref)
+        self.assertEqual(plat.joined, [])
+
+    def test_latches_the_lease_only_after_a_confirmed_rejoin(self):
+        # The rejoin path ran and wait_online confirmed: the observed lease IS the verified
+        # home reference (this is also how a launch-blanked reference recovers).
+        plat = self.Fake("4.3.2.2")
+        plat_addr_after = "192.168.1.26"
+        plat.current_address = lambda seq=iter(["4.3.2.2", plat_addr_after]): next(seq)
+        ok, ref = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertTrue(ok)
+        self.assertEqual(ref, plat_addr_after)
 
     def test_reports_failure_when_it_cannot_get_off(self):
         plat = self.Fake("4.3.2.2", online=False)
-        self.assertFalse(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
+        self.assertFalse(ok)
 
 
 class TestIsConnected(unittest.TestCase):
