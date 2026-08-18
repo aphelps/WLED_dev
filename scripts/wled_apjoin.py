@@ -731,7 +731,16 @@ def main():
     dog = plat.watchdog(home_ssid, args.home_password, hop_budget)
     # The between-hop detach compares against this, not against a subnet list: it is captured
     # while the host is still on its own network (the LAN pre-flight just ran from it).
+    # A home LAN that leases from a device-AP subnet is a real ambiguity nothing mid-run can
+    # resolve — is_connected would fail every rejoin while the host is demonstrably home — so
+    # refuse loudly here rather than failing later with a radio-shaped message.
     home_addr = plat.current_address()
+    if home_addr and home_addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+        dog.terminate()
+        print(f"ERROR: the home network's lease ({home_addr}) is inside a device-AP subnet "
+              f"({AP_SUBNET}x / {ESP_AP_SUBNET}x), so a rejoin can never be confirmed. "
+              "Move the home LAN off these ranges to use this tool.", file=sys.stderr)
+        return 1
     attempts, last_push, report = {}, {}, []
     # A verdict that says something about the DEVICE is final; one that says something about the
     # RADIO is not. `join-failed` is the flapping case — the AP was there during the scan and gone
@@ -767,7 +776,7 @@ def main():
                 # equality fast-path skip every later rejoin.
                 if home_addr:
                     fresh = plat.current_address()
-                    if fresh and not fresh.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+                    if fresh and not fresh.startswith((AP_SUBNET, ESP_AP_SUBNET, "169.254.")):
                         home_addr = fresh
             if radio_stuck:
                 break
