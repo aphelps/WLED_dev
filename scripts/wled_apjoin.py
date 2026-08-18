@@ -156,6 +156,8 @@ def identify(info):
 
 AP_SUBNET = "4.3.2."         # every WLED AP leases its client from this subnet
 ESP_AP_SUBNET = "192.168.4." # ESP-IDF default softAP lease — Tasmota/ESPHome setup-mode APs
+DEVICE_AP_SUBNETS = (AP_SUBNET, ESP_AP_SUBNET)
+NOT_HOME = DEVICE_AP_SUBNETS + ("169.254.",)   # device leases + link-local: never a home reference
 
 
 def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None):
@@ -171,7 +173,7 @@ def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None
     addr = plat.current_address()
     if addr and addr == home_addr:
         return True
-    if addr and not home_addr and not addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+    if addr and not home_addr and not addr.startswith(DEVICE_AP_SUBNETS):
         return True
     plat.join(home_ssid, home_password, timeout)
     return bool(plat.wait_online(30))
@@ -337,7 +339,7 @@ class MacPlatform:
         addr = (ip.stdout or "").strip()
         if not addr:
             return False
-        if addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+        if addr.startswith(DEVICE_AP_SUBNETS):
             return False          # still on a device SoftAP (WLED 4.3.2.x / ESP-IDF 192.168.4.x)
         if addr.startswith("169.254."):
             return False          # link-local: associated but no DHCP
@@ -735,7 +737,9 @@ def main():
     # resolve — is_connected would fail every rejoin while the host is demonstrably home — so
     # refuse loudly here rather than failing later with a radio-shaped message.
     home_addr = plat.current_address()
-    if home_addr and home_addr.startswith((AP_SUBNET, ESP_AP_SUBNET)):
+    if home_addr and home_addr.startswith("169.254."):
+        home_addr = ""  # link-local is not a home reference; fall back to the subnet check
+    if home_addr and home_addr.startswith(DEVICE_AP_SUBNETS):
         dog.terminate()
         print(f"ERROR: the home network's lease ({home_addr}) is inside a device-AP subnet "
               f"({AP_SUBNET}x / {ESP_AP_SUBNET}x), so a rejoin can never be confirmed. "
@@ -776,7 +780,7 @@ def main():
                 # equality fast-path skip every later rejoin.
                 if home_addr:
                     fresh = plat.current_address()
-                    if fresh and not fresh.startswith((AP_SUBNET, ESP_AP_SUBNET, "169.254.")):
+                    if fresh and not fresh.startswith(NOT_HOME):
                         home_addr = fresh
             if radio_stuck:
                 break
