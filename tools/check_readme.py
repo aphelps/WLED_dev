@@ -12,7 +12,9 @@ URL, and two sections that announced they were checking the README while actuall
 literals. Both are fixed below by parsing the README and matching precisely; if you add a check,
 prove it fails by breaking the thing it guards.
 
-Run: python3 tools/check_readme.py   (exit 1 on any failure; runs from anywhere)
+Run via `make test-readme` — the Makefile fails hard on a missing submodule before Python
+starts. Invoked directly, a missing submodule is a SKIP with exit 0, so the bare script is not a
+safe CI entry point on an uninitialised clone. Exit 1 on any failure; runs from anywhere.
 """
 import os
 import re
@@ -61,24 +63,33 @@ def main():
         check(not target.startswith(SUBMODULE_PREFIXES), f"link not into a submodule: {target}")
 
     print("commands shown in bash blocks actually parse")
+    # Whole block at once: per-line `bash -n` rejects any multi-line construct (`for ... do` alone
+    # is a syntax error, and so is `done`), while a broken `\`-continuation parses fine as two
+    # independent halves. The block is the unit a reader pastes.
+    makefile = read("Makefile")
+    make_targets = sorted(set(re.findall(r"^([A-Za-z][\w.-]*):", makefile, re.M)), key=len,
+                          reverse=True)
+    glued = re.compile(r"\b(" + "|".join(re.escape(tg) for tg in make_targets) + r")#")
     for block in re.findall(r"```bash\n(.*?)```", readme, re.S):
+        first = next((ln.strip() for ln in block.splitlines() if ln.strip()), "")
+        ok = subprocess.run(["bash", "-n"], input=block, text=True,
+                            capture_output=True).returncode == 0
+        check(ok, f"pastes cleanly: {first[:60]}")
         for line in block.splitlines():
             if not line.strip() or line.strip().startswith("#"):
                 continue
-            ok = subprocess.run(["bash", "-n"], input=line, text=True,
-                                capture_output=True).returncode == 0
-            check(ok, f"pastes cleanly: {line.strip()[:60]}")
             # bash -n only catches SYNTAX errors. `make test-libs# note` parses fine as a command
-            # yet invokes the target `test-libs#`, which does not exist. A comment marker must be
-            # preceded by whitespace or it is glued to the token before it.
-            check(not re.search(r"\S#", line), f"'#' is separated from the command: {line.strip()[:60]}")
+            # yet invokes the target `test-libs#`, which does not exist. Matching bare `\S#`
+            # false-positives on URL fragments and quoted strings, so only fire when the token
+            # fused to the `#` is a real make target.
+            check(not glued.search(line),
+                  f"'#' is separated from the make target: {line.strip()[:60]}")
 
     print("no instruction to consult CLAUDE.md for a setup step")
     check(not re.search(r"see CLAUDE|refer to CLAUDE|per CLAUDE", readme, re.I),
           "README stands alone for setup")
 
     print("every make target the README names exists")
-    makefile = read("Makefile")
     named_targets = sorted(set(re.findall(r"^make (test[a-z-]*)\b", readme, re.M)))
     check(bool(named_targets), "README names at least one make target")
     for target in named_targets:
@@ -112,19 +123,36 @@ def main():
         check(row is not None, f"submodule table row for {path} -> {stripped}")
 
     print("drift-prone numbers still true")
+    # A missing source key is a FAIL line, not an AttributeError traceback — same principle as
+    # the submodule pre-flight above.
     pkg = read("WLED/package.json")
-    version = re.search(r'"version":\s*"([^"]+)"', pkg).group(1)
-    check(f"WLED {version}" in readme, f"WLED version {version} as stated")
+    version_m = re.search(r'"version":\s*"([^"]+)"', pkg)
+    check(version_m is not None, "WLED/package.json has a version field")
+    if version_m:
+        check(f"WLED {version_m.group(1)}" in readme,
+              f"WLED version {version_m.group(1)} as stated")
+    # Match the number near its keyword rather than an exact phrase: "37 build environments" is
+    # still true and must still pass, while a wrong count or a new upstream env must still fail.
     env_count = len(re.findall(r"^\[env:", inis["WLED/platformio.ini"], re.M))
-    check(f"{env_count} environments" in readme, f"{env_count} environments as stated")
+    check(re.search(rf"\b{env_count}\b[^.\n]*environments", readme) is not None,
+          f"{env_count} environments as stated")
     # Stop at the blank line that terminates the continued value. Matching to the next [section]
     # over-captures the keys that follow and inflates the count — it said 36 when the answer is 23.
-    default_envs = re.search(r"^default_envs\s*=\s*(.*?)(?=^\s*$)",
-                             inis["WLED/platformio.ini"], re.M | re.S).group(1)
-    n_default = len([e for e in default_envs.split() if e and not e.startswith((";", "#"))])
-    check(f"{n_default} ESP8266 and" in readme or f"lists {n_default} " in readme,
-          f"{n_default} default_envs targets as stated")
-    port = re.search(r"^upload_port\s*=\s*(\S+)", inis["WLED/platformio.ini"], re.M)
+    default_m = re.search(r"^default_envs\s*=\s*(.*?)(?=^\s*$)",
+                          inis["WLED/platformio.ini"], re.M | re.S)
+    check(default_m is not None, "WLED/platformio.ini has default_envs")
+    if default_m:
+        n_default = len([e for e in default_m.group(1).split()
+                         if e and not e.startswith((";", "#"))])
+        check(re.search(rf"\b{n_default}\b[^.\n]*(ESP8266|targets)", readme) is not None,
+              f"{n_default} default_envs targets as stated")
+    # Scope to [env:ampworks]: the first upload_port anywhere in the ~3000-line upstream ini is
+    # only ours by luck. And a missing key is a failure, not silence — the README hardcodes the
+    # device address in three places on the strength of this value.
+    ampworks_ini = inis["WLED/platformio.ini"].split("[env:ampworks]", 1)[-1].split("\n[env:")[0]
+    check("[env:ampworks]" in inis["WLED/platformio.ini"], "[env:ampworks] exists")
+    port = re.search(r"^upload_port\s*=\s*(\S+)", ampworks_ini, re.M)
+    check(port is not None, "upload_port set in [env:ampworks]")
     if port:
         check(port.group(1) in readme, f"default device {port.group(1)} as stated")
 
