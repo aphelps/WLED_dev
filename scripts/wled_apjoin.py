@@ -154,6 +154,24 @@ def identify(info):
     return True, mac, "WLED device"
 
 
+AP_SUBNET = "4.3.2."     # every WLED AP leases its client from this subnet
+
+
+def ensure_off_device_ap(plat, home_ssid, home_password, timeout):
+    """Known radio state between hops. A host still associated to a device AP (after any
+    no-reboot verdict — nothing in provision_one disassociates, forget() only edits the
+    preferred list) does two kinds of damage: WLED holds its own join retry until the AP client
+    count hits zero, so the grace window spends itself preventing the join it is waiting for;
+    and the next hop starts with before_addr on the AP subnet, which every WLED AP leases
+    again, so the address-change check reports "never left" against a join that worked.
+    Returns True once the host no longer holds an AP-subnet address."""
+    addr = plat.current_address()
+    if not addr or not addr.startswith(AP_SUBNET):
+        return True
+    plat.join(home_ssid, home_password, timeout)
+    return bool(plat.wait_online(30))
+
+
 def watchdog_hop_budget(args):
     """Worst case for ONE candidate: every join retry timing out with a full DHCP wait, the push
     confirm polled twice, plus a flat allowance for identify retries and the finally-restore
@@ -183,11 +201,14 @@ def decide_action(mac, lan_macs, attempts, max_attempts, last_push=None, now=Non
     """
     if mac and mac.lower() in {m.lower() for m in lan_macs}:
         return "skip", "already on this LAN"
-    if attempts.get(mac, 0) >= max_attempts:
-        return "give-up", f"already tried {max_attempts}x without it appearing"
+    # Grace BEFORE give-up: the one state the grace exists for is "final allowed push seconds
+    # ago, mid-reboot" — reaching give-up (terminal) there would retire the shared SSID exactly
+    # when that push is about to succeed, stranding a second device behind the same name.
     since = None if not last_push or mac not in last_push else (now or time.time()) - last_push[mac]
     if since is not None and since < PUSH_GRACE_S:
         return "waiting", f"pushed {int(since)}s ago — waiting for it to appear"
+    if attempts.get(mac, 0) >= max_attempts:
+        return "give-up", f"already tried {max_attempts}x without it appearing"
     return "push", "not on this LAN"
 
 
@@ -711,7 +732,7 @@ def main():
     # `pushed` is deliberately NOT here: it retires a MAC (via decide_action's grace/attempts),
     # never the SSID — a second stock device broadcasts the same `WLED-AP` and still needs a turn.
     TERMINAL = {"not-wled", "skip", "give-up", "push-failed", "inspected"}
-    done, empty_rounds, scan_broken = set(), 0, False
+    done, empty_rounds, scan_broken, radio_stuck = set(), 0, False, False
     try:
         while True:
             for n, _why in candidates:
@@ -725,6 +746,14 @@ def main():
                 provision_one(plat, n, args, lan_macs, attempts, report, last_push)
                 if any(r[1] in TERMINAL for r in report[mark:]):
                     done.add(n["ssid"])
+                if not ensure_off_device_ap(plat, home_ssid, args.home_password,
+                                            args.connect_timeout):
+                    print("WARNING: could not detach from the device AP; "
+                          "stopping adoption early.", file=sys.stderr)
+                    radio_stuck = True
+                    break
+            if radio_stuck:
+                break
 
             if time.time() >= deadline:
                 break
@@ -798,7 +827,7 @@ def main():
     bad = [r for r in report if r[1] in ("join-failed", "push-failed", "never-appeared")]
     if scan_broken:
         return 2
-    return 1 if bad or not back else 0
+    return 1 if bad or radio_stuck or not back else 0
 
 
 if __name__ == "__main__":

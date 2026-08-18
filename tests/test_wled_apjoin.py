@@ -158,11 +158,49 @@ class TestDecision(unittest.TestCase):
                                      last_push={ESP_MAC: 1000.0}, now=late)
         self.assertEqual(action, "give-up")
 
+    def test_grace_shields_the_final_push_from_give_up(self):
+        # attempts == max_attempts AND within the grace: the last allowed push happened seconds
+        # ago and the device is mid-reboot. give-up (terminal — retires the shared SSID) here
+        # would strand a second device behind the same name; the verdict must be waiting.
+        action, _ = aj.decide_action(ESP_MAC, set(), {ESP_MAC: 2}, 2,
+                                     last_push={ESP_MAC: 1000.0}, now=1000.0 + 5)
+        self.assertEqual(action, "waiting")
+
     def test_a_different_mac_behind_the_same_ssid_is_pushed(self):
         # The whole point of per-MAC finality: device B is not penalised for device A's push.
         action, _ = aj.decide_action("244cab000001", set(), {ESP_MAC: 1}, 2,
                                      last_push={ESP_MAC: 1000.0}, now=1000.0 + 5)
         self.assertEqual(action, "push")
+
+
+class TestEnsureOffDeviceAp(unittest.TestCase):
+    class Fake:
+        def __init__(self, addr, online=True):
+            self.addr, self.online, self.joined = addr, online, []
+
+        def current_address(self):
+            return self.addr
+
+        def join(self, ssid, password=None, timeout=30):
+            self.joined.append(ssid)
+            return True, None
+
+        def wait_online(self, deadline_s):
+            return "192.168.1.26" if self.online else None
+
+    def test_no_op_when_not_on_the_ap_subnet(self):
+        plat = self.Fake("192.168.1.26")
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        self.assertEqual(plat.joined, [], "must not touch the radio when already off the AP")
+
+    def test_rejoins_home_when_still_holding_an_ap_lease(self):
+        plat = self.Fake("4.3.2.2")
+        self.assertTrue(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
+        self.assertEqual(plat.joined, ["HomeNet"])
+
+    def test_reports_failure_when_it_cannot_get_off(self):
+        plat = self.Fake("4.3.2.2", online=False)
+        self.assertFalse(aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5))
 
 
 class TestWatchdogHopBudget(unittest.TestCase):
