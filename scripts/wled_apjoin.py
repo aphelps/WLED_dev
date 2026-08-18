@@ -760,6 +760,11 @@ def main():
                           "stopping adoption early.", file=sys.stderr)
                     radio_stuck = True
                     break
+                # Refresh the reference after a successful detach: a mid-run DHCP lease change
+                # would otherwise fail the equality check on every later hop and pay a
+                # redundant join + wait_online each time.
+                if home_addr:
+                    home_addr = plat.current_address() or home_addr
             if radio_stuck:
                 break
 
