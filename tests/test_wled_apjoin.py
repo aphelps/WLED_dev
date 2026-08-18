@@ -175,15 +175,15 @@ class TestDecision(unittest.TestCase):
 
 class TestEnsureOffDeviceAp(unittest.TestCase):
     class Fake:
-        def __init__(self, addr, online=True):
-            self.addr, self.online, self.joined = addr, online, []
+        def __init__(self, addr, online=True, join_ok=True):
+            self.addr, self.online, self.join_ok, self.joined = addr, online, join_ok, []
 
         def current_address(self):
             return self.addr
 
         def join(self, ssid, password=None, timeout=30):
             self.joined.append(ssid)
-            return True, None
+            return (True, None) if self.join_ok else (False, "could not find network")
 
         def wait_online(self, deadline_s):
             return "192.168.1.26" if self.online else None
@@ -261,6 +261,16 @@ class TestEnsureOffDeviceAp(unittest.TestCase):
         plat = self.Fake("4.3.2.2", online=False)
         ok, _ = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5)
         self.assertFalse(ok)
+
+    def test_a_failed_rejoin_on_a_stranger_lease_neither_confirms_nor_latches(self):
+        # Rejoin-path companion to the never-latch test: association fails while the host still
+        # holds a routable stranger 10.x (which is_connected-style confirmation would accept).
+        # join's result must decide, and the reference must stay untouched.
+        plat = self.Fake("10.0.0.7", join_ok=False)
+        ok, ref = aj.ensure_off_device_ap(plat, "HomeNet", "pw", 5,
+                                          home_addr="192.168.1.26")
+        self.assertFalse(ok)
+        self.assertEqual(ref, "192.168.1.26")
 
 
 class TestIsConnected(unittest.TestCase):

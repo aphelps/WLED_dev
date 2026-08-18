@@ -182,7 +182,11 @@ def ensure_off_device_ap(plat, home_ssid, home_password, timeout, home_addr=None
         return True, home_addr
     if addr and not home_addr and not addr.startswith(NOT_HOME):
         return True, home_addr
-    plat.join(home_ssid, home_password, timeout)
+    ok, _err = plat.join(home_ssid, home_password, timeout)
+    if not ok:
+        # A failed association while still holding a routable stranger lease would otherwise
+        # "confirm" via wait_online and latch that lease as home below.
+        return False, home_addr
     if not plat.wait_online(30):
         return False, home_addr
     fresh = plat.current_address()
