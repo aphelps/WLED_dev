@@ -19,8 +19,13 @@ ws = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ws)
 
 
-# Real name tables, trimmed. Indices are what matter: the SAME name sits at a DIFFERENT index in
-# each version, which is the entire reason this tool resolves by name.
+# SYNTHETIC tables, not captured or trimmed real ones: real names at the indices that matter, with
+# the gaps filled by repeated padding. Only the indices are under test — the SAME name sits at a
+# DIFFERENT index in each version, which is the entire reason this tool resolves by name — and
+# padding establishes that exactly as well as a real table would.
+#
+# Said plainly because "real tables, trimmed" sends anyone chasing a discrepancy off to look for a
+# capture that does not exist. EFF_16 is 220 entries, EFF_014 is 186.
 EFF_16 = ["Solid", "Blink", "Breathe", "Wipe"] + ["RSVD"] * 138 + ["Android"] * 36 + \
          ["Hiphotic"] + ["Candy Cane"] * 41
 EFF_014 = ["Solid", "Blink", "Breathe", "Wipe", "Police", "Meteor Smooth"] + ["Android"] * 100 + \
