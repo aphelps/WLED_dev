@@ -403,6 +403,63 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_usermod_palette_survives_end_to_end(self):
+        """resolve_palette's 255-j arithmetic is unit-tested; this proves it reaches the wire.
+
+        Mutation that motivated it: replacing dev.get("umpalnames") with None left every test
+        green, because nothing drove a usermod palette through sync_one.
+        """
+        posts = []
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "um", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10},
+                                     "umpalnames": UMPAL},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED}, posts=posts)
+        try:
+            scan = ws.load_scanner()
+            host = f"127.0.0.1:{srv.server_port}"
+            dev = scan.probe(host, 2.0)
+
+            class A:
+                effect, color, dry_run = None, None, False
+                palette = UMPAL[0]
+                speed = intensity = None
+            row = ws.sync_one(scan, dev, A(), None, 2.0)
+            body = json.loads(bodies[-1])
+            self.assertEqual(body["seg"]["pal"], 255 - 0,
+                             "a usermod palette must go on the wire at 255-j, not its list index")
+            self.assertNotEqual(row["status"], "skipped")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_verify_after_apply_is_wired_not_just_implemented(self):
+        """verify_applied is unit-tested; this covers the WIRING that consumes its result.
+
+        Note what actually drives it: sync_one checks the POST *response* (wled_sync.py:361), not a
+        later GET of /json/state. The stub answers every POST with `{}` — a state holding nothing
+        that was asked for — so a run that ignores the verdict reports "applied" and fails here.
+        Confirmed by mutation: replacing that line with `problems = []` fails this test and only
+        this test.
+        """
+        posts = []
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "liar", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10}},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED}, posts=posts)
+        try:
+            scan = ws.load_scanner()
+            host = f"127.0.0.1:{srv.server_port}"
+            dev = scan.probe(host, 2.0)
+
+            class A:
+                effect, palette, color, dry_run = "Hiphotic", None, None, False
+                speed = intensity = None
+            row = ws.sync_one(scan, dev, A(), None, 2.0)
+            self.assertNotEqual(row["status"], "applied",
+                                "a device that did not apply what was asked must not report applied")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_apply_forwards_speed_and_intensity(self):
         # The line forwarding args.speed into build_body had no coverage at all: every existing
         # test used dry_run=True and returned before reaching it. This also makes the stubs'
