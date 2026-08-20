@@ -460,6 +460,74 @@ class TestCrossVersionOverHTTP(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def _run_main(self, argv):
+        """Drive main() against a stub. Returns (exit_code, stderr_text)."""
+        import io, contextlib
+        old = sys.argv
+        sys.argv = ["wled_sync"] + argv
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                try:
+                    rc = ws.main()
+                except SystemExit as e:
+                    rc = e.code
+            return (0 if rc is None else rc), err.getvalue()
+        finally:
+            sys.argv = old
+
+    def test_no_phase_really_suppresses_the_timebase(self):
+        """--no-phase had zero coverage: main() could ignore the flag entirely.
+
+        The mutation that exposed it — `timebase = make_timebase()`, dropping the conditional —
+        left all 33 green. Asserted on the WIRE body rather than on the local variable, because
+        what matters is that no tb reaches the device.
+        """
+        posts = []
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "np", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10}},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED}, posts=posts)
+        try:
+            host = f"127.0.0.1:{srv.server_port}"
+            self._run_main(["--effect", "Hiphotic", "--host", host,
+                            "--timeout", "2", "--no-phase"])
+            self.assertTrue(bodies, "the run must have POSTed something")
+            self.assertNotIn("tb", json.loads(bodies[-1]),
+                             "--no-phase must keep tb off the wire entirely")
+
+            # And the other direction: without the flag, tb IS sent. A test asserting only the
+            # absence would pass against a build that never sends tb at all.
+            self._run_main(["--effect", "Hiphotic", "--host", host, "--timeout", "2"])
+            self.assertIn("tb", json.loads(bodies[-1]),
+                          "without --no-phase the shared timebase must be sent")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_colour_moot_warning_is_actually_reachable(self):
+        """The warning was unreachable from any test — `if False:` left all 33 green.
+
+        It exists because a palette that supplies its own colours makes --color silently do
+        nothing, which looks like a broken tool rather than a misuse.
+        """
+        srv = _serve({"/json/info": {"brand": "WLED", "name": "moot", "ver": "16.0.1",
+                                     "fxcount": len(EFF_16), "leds": {"count": 10}},
+                      "/json/eff": EFF_16, "/json/pal": PAL_FIXED})
+        try:
+            host = f"127.0.0.1:{srv.server_port}"
+            _, err = self._run_main(["--color", "255,0,0", "--palette", "Random Cycle",
+                                     "--host", host, "--timeout", "2", "--dry-run"])
+            self.assertIn("WARNING", err)
+            self.assertIn("Random Cycle", err)
+
+            # A colour-DRIVEN palette must not warn, or the warning becomes noise people ignore.
+            _, err2 = self._run_main(["--color", "255,0,0", "--palette", "Color 1",
+                                      "--host", host, "--timeout", "2", "--dry-run"])
+            self.assertNotIn("WARNING", err2)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_apply_forwards_speed_and_intensity(self):
         # The line forwarding args.speed into build_body had no coverage at all: every existing
         # test used dry_run=True and returned before reaching it. This also makes the stubs'
