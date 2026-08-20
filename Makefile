@@ -6,6 +6,7 @@
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
 #   make test-hmtl  # just the HMTL cross-ABI wire-layout sweep + its negative control
 #   make test-router# just the esp-now-router relay + leader-election tests
+#   make test-readme# verify README.md's claims against the source files
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
 #
@@ -15,9 +16,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-sync test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-readme test-ui test-all clean test-sync
 
-test: test-wled test-bridge test-libs test-hmtl test-router test-sync
+test: test-wled test-bridge test-libs test-hmtl test-router test-readme test-sync
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -128,6 +129,26 @@ test-libs:
 # report success, and have cross-checked no embedded ABI at all — the same "a skipped suite reports
 # green" failure the STRICT machinery above exists to prevent. Today's CI runner has xtensa (the
 # espressif32 platform install brings it), so this passes; only avr-g++ is missing.
+# The sweep covers static_asserts — compile-time LAYOUT. It says nothing about the code that READS
+# those structs, and HMTL's behavioural suite (platformio/HMTL_Test, `pio test -e native`) ran under
+# no automation at all: HMTL has no .github/workflows, and this target reached only tests/layout/.
+# So HMTL#9's program_color() clamp — the narrowing, the zero-length rule, the stale-invocation
+# rejection — landed with tests that nothing invoked.
+#
+# Delegated to HMTL's own `make test-native` rather than spelled out here, so the env list stays in
+# the repo that owns it. Which is why this comment does NOT promise which envs run: HMTL#9 makes it
+# both pixel widths (an `#ifdef BIG_PIXELS` branch in a test body is dead source unless something
+# compiles the flag), but an older HMTL pin runs whatever IT lists, and a promise made here would
+# quietly become false. HMTL's test-native prints what it actually ran.
+#
+# PIO defaults to the venv setup.sh builds and falls back to PATH; if neither resolves this is a
+# skipped suite like any other, which STRICT=1 turns into a failure.
+#
+# HMTL's `test-python` is deliberately NOT wired in: it needs pytest, which is not in
+# WLED/requirements.txt, so adding it here would fail on a fresh CI venv. Adding pytest to the
+# pinned toolchain is a separate decision about this repo's dependency set — filed, not smuggled in.
+PIO ?= ./.venv/bin/pio
+
 test-hmtl:
 	@echo "== HMTL cross-ABI wire layout sweep =="
 	$(call require_submodule,HMTL)
@@ -138,6 +159,19 @@ test-hmtl:
 	    REQUIRE_TOOLCHAINS=$(REQUIRE_TOOLCHAINS) REQUIRE_ANY_REAL=$(require_any_real) && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout packed-access && \
 	  $(MAKE) --no-print-directory -C HMTL/tests/layout negative || exit 1; \
+	fi
+	@# No "(both pixel widths)" here: the env list lives in HMTL's own Makefile, so an older HMTL
+	@# pin can run one env while this banner claims two. HMTL's test-native prints what it ran.
+	@echo "== HMTL native behaviour tests =="
+	@pio_bin=""; \
+	if [ -x "$(PIO)" ]; then pio_bin="$(abspath $(PIO))"; \
+	else pio_bin="$$(command -v $(notdir $(PIO)) 2>/dev/null || true)"; fi; \
+	if [ ! -f HMTL/platformio/HMTL_Test/platformio.ini ]; then \
+	  $(call missing_tests,no HMTL_Test/ at the pinned HMTL revision); \
+	elif [ -z "$$pio_bin" ]; then \
+	  $(call missing_tests,pio not found at $(PIO) nor on PATH — run ./setup.sh); \
+	else \
+	  $(MAKE) --no-print-directory -C HMTL test-native PIO="$$pio_bin" || exit 1; \
 	fi
 
 # esp-now-router: the relay + leader-election host tests (delegates to that repo's own Makefile,
@@ -161,6 +195,13 @@ test-sync:
 	else \
 	  python3 tests/test_wled_sync.py; \
 	fi
+# README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
+# so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
+test-readme:
+	@echo "== README claim checks =="
+	$(call require_submodule,WLED)
+	$(call require_submodule,esp-now-router)
+	@python3 tools/check_readme.py
 
 # WLED web-UI builder test (Node/npm).
 test-ui:

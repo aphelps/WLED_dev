@@ -89,9 +89,18 @@ make test-sync      # just these
 make test           # everything in the repo
 ```
 
-No hardware and no external network — the cross-version tests run against loopback HTTP stubs
-serving captured 16.0.1 and 0.14.4 name tables. The assertions worth knowing about: the same
-effect *name* resolves to a different index per firmware version (the reason the tool syncs by
-name at all), the broadcast-suppression flag `udpn.nn` is on every request — without it a synced
-device re-broadcasts raw indices to the fleet and undoes the run — `--dry-run` writes nothing,
-and verify-after-apply catches a deliberately wrong application.
+No hardware and no external network — the cross-version tests run against loopback HTTP stubs.
+Their name tables are **synthetic, not captured**: real names at the indices that matter, padded
+with filler (`["RSVD"] * 138` and friends) to put the same name at a different index per version.
+That is the property under test, and padding tests it exactly as well as a real table would.
+
+The assertions worth knowing about: the same effect *name* resolves to a different index per
+firmware version (the reason the tool syncs by name at all), the broadcast-suppression flag
+`udpn.nn` is on every request — without it a synced device re-broadcasts raw indices to the fleet
+and undoes the run — `--dry-run` writes nothing, `--speed`/`--intensity` outside 0-255 exit 2
+(WLED does not clamp: above 255 becomes 0 and freezes the fleet), and `verify_applied` rejects a
+state that does not hold what was asked for.
+
+One limit worth stating rather than implying: `verify_applied` is exercised **directly**, not
+through a stub round-trip — no stub serves `/json/state`. So the function is tested; the
+apply-then-verify path over HTTP is not.

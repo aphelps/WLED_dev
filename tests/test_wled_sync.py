@@ -183,6 +183,56 @@ class TestExitRule(unittest.TestCase):
         self.assertEqual(ws.exit_code([]), 1)
 
 
+class TestArgRanges(unittest.TestCase):
+    """--speed / --intensity range enforcement.
+
+    This existed with NO coverage: deleting the check at wled_sync.py:411-414 left the whole suite
+    green, while scripts/README.md advertises the exit-2 behaviour to users. It matters because WLED
+    does NOT clamp — getVal passes no bounds and ArduinoJson returns 0 for a value that will not fit
+    a uint8_t, so `--speed 999` sets sx=0 on every device, a visible freeze, with nothing downstream
+    to catch it.
+
+    Driven through main() rather than by calling the validator, so deleting the call site fails too,
+    not just gutting the function.
+    """
+
+    # Pin to one address and never change anything: without --host the tool sweeps the whole
+    # subnet, so a test that reaches this code would contact every real device on the LAN.
+    HERMETIC = ["--dry-run", "--host", "127.0.0.1", "--timeout", "1"]
+
+    def _run(self, argv):
+        """Return the exit code. argparse raises SystemExit(2); a successful run just returns."""
+        old = sys.argv
+        sys.argv = ["wled_sync"] + argv
+        try:
+            try:
+                rc = ws.main()
+            except SystemExit as e:
+                return e.code
+            return 0 if rc is None else rc
+        finally:
+            sys.argv = old
+
+    def test_speed_above_255_is_rejected(self):
+        self.assertEqual(self._run(["--speed", "999"] + self.HERMETIC), 2)
+
+    def test_intensity_above_255_is_rejected(self):
+        self.assertEqual(self._run(["--intensity", "256"] + self.HERMETIC), 2)
+
+    def test_negative_values_are_rejected(self):
+        self.assertEqual(self._run(["--speed", "-1"] + self.HERMETIC), 2)
+        self.assertEqual(self._run(["--intensity", "-5"] + self.HERMETIC), 2)
+
+    def test_the_boundaries_themselves_are_ACCEPTED(self):
+        # The half that a too-eager check would break: 0 and 255 are legal values, and 0 is
+        # falsy — a validator written as `if not val` would reject it.
+        # --host pins it to one address so this never sweeps a subnet; --dry-run changes nothing.
+        for argv in (["--speed", "0"], ["--speed", "255"],
+                     ["--intensity", "0"], ["--intensity", "255"]):
+            code = self._run(argv + self.HERMETIC)
+            self.assertNotEqual(code, 2, f"{argv} should not be an argument error")
+
+
 class TestColour(unittest.TestCase):
     def test_parse_forms(self):
         self.assertEqual(ws.parse_colour("#FF0000")[0], [255, 0, 0])
