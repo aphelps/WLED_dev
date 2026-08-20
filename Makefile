@@ -7,6 +7,7 @@
 #   make test-hmtl  # just the HMTL cross-ABI wire-layout sweep + its negative control
 #   make test-router# just the esp-now-router relay + leader-election tests
 #   make test-apjoin# just the scripts/wled_apjoin.py host tests (see scripts/README.md)
+#   make test-readme# verify README.md's claims against the source files
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
 #
@@ -16,9 +17,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-apjoin test-ui test-all clean
+.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-readme test-ui test-all clean test-apjoin
 
-test: test-wled test-bridge test-libs test-hmtl test-router test-apjoin
+test: test-wled test-bridge test-libs test-hmtl test-router test-readme test-apjoin
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -196,6 +197,14 @@ test-apjoin:
 	else \
 	  python3 tests/test_wled_apjoin.py; \
 	fi
+
+# README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
+# so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
+test-readme:
+	@echo "== README claim checks =="
+	$(call require_submodule,WLED)
+	$(call require_submodule,esp-now-router)
+	@python3 tools/check_readme.py
 
 # WLED web-UI builder test (Node/npm).
 test-ui:
