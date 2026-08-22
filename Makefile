@@ -71,7 +71,7 @@ test-wled:
 	@if [ ! -d WLED/usermods/ampworks/tests ]; then \
 	  $(call missing_tests,no tests/ at the pinned WLED revision); \
 	else \
-	  cd WLED/usermods/ampworks/tests && for t in sensor_sync_test sensor_sync_ring_test; do \
+	  cd WLED/usermods/ampworks/tests && for t in sensor_sync_test sensor_sync_ring_test sensor_control_test; do \
 	    echo "-- $$t --"; \
 	    $(CXX) $(CXXFLAGS) -o /tmp/wled_$$t $$t.cpp && /tmp/wled_$$t || exit 1; \
 	  done; \
@@ -226,5 +226,5 @@ clean:
 	@$(MAKE) --no-print-directory -C esp-now-router/tests clean 2>/dev/null || true
 	@$(MAKE) --no-print-directory -C ArduinoLibs/test clean 2>/dev/null || true
 	@$(MAKE) --no-print-directory -C HMTL/tests/layout clean 2>/dev/null || true
-	@rm -f /tmp/wled_sensor_sync_test /tmp/wled_sensor_sync_ring_test
+	@rm -f /tmp/wled_sensor_sync_test /tmp/wled_sensor_sync_ring_test /tmp/wled_sensor_control_test
 	@rm -f /tmp/wled_rs485_bridge_test /tmp/wled_rs485_bridge_test_avr
