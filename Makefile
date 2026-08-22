@@ -6,6 +6,7 @@
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
 #   make test-hmtl  # just the HMTL cross-ABI wire-layout sweep + its negative control
 #   make test-router# just the esp-now-router relay + leader-election tests
+#   make test-apjoin# just the scripts/wled_apjoin.py host tests (see scripts/README.md)
 #   make test-readme# verify README.md's claims against the source files
 #   make test-ui    # WLED web-UI builder test (needs Node)
 #   make test-all   # everything, including the UI test
@@ -16,9 +17,9 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-readme test-ui test-all clean test-sync
+.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-readme test-ui test-all clean test-sync test-apjoin
 
-test: test-wled test-bridge test-libs test-hmtl test-router test-readme test-sync
+test: test-wled test-bridge test-libs test-hmtl test-router test-readme test-sync test-apjoin
 	@echo ""
 	@echo "OK — all submodule host tests passed."
 
@@ -194,6 +195,17 @@ test-sync:
 	  $(call missing_tests,no tests/test_wled_sync.py); \
 	else \
 	  python3 tests/test_wled_sync.py; \
+	fi
+
+# AP auto-join tool: candidate selection, identity gating and the safety properties (never push to
+# an unidentified AP; always forget the AP we joined). Pure Python against a fake platform — no
+# radio is touched.
+test-apjoin:
+	@echo "== wled_apjoin host tests =="
+	@if [ ! -f tests/test_wled_apjoin.py ]; then \
+	  $(call missing_tests,no tests/test_wled_apjoin.py); \
+	else \
+	  python3 tests/test_wled_apjoin.py; \
 	fi
 # README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
 # so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
