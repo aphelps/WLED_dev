@@ -2,16 +2,19 @@
 
 Fleet-level tools that operate on WLED devices over the network, rather than on the firmware source.
 They're plain Python 3 (standard library only) plus one small Swift helper, so there's nothing to
-install — but they do drive the machine's Wi-Fi radio, so read the safety notes before the first
-real run.
+install — but `wled_apjoin.py` drives the machine's Wi-Fi radio, so read its safety notes before the
+first real run.
 
 | Script | For |
 |---|---|
 | `wled_apjoin.py` | Find devices sitting in AP-fallback mode (`WLED-AP`) and put them on your network, without connecting to each one by hand. |
-| `wled_scan_ap.swift` | Helper for the above: lists visible Wi-Fi networks as JSON. Read-only; safe to run on its own. |
+| `wled_sync.py` | Put every WLED device on the network onto the same effect, colour and palette, phase-aligned so they animate together. |
+| `wled_scan_ap.swift` | Helper for `wled_apjoin.py`: lists visible Wi-Fi networks as JSON. Read-only; safe to run on its own. |
 
 Related: `skills/wled-scan/` finds devices that are **already** on your LAN and tables their config
-(`wleds`). `wled_apjoin.py` is the step before that — getting them onto the LAN in the first place.
+(`wleds`). The two tools bracket it — `wled_apjoin.py` is the step before (getting devices onto the
+LAN at all), and `wled_sync.py` the step after (driving the ones that are already there). Both reuse
+its discovery rather than reimplementing it.
 
 ---
 
@@ -234,7 +237,85 @@ non-empty SSID is the signature of credentials that didn't save.
 
 ---
 
+## `wled_sync.py` — one look across the whole installation
+
+Sweeps the local subnet, finds every WLED device, and applies the same state to all of them. The
+point is the *whole* installation matching, so it also aligns animation phase — without that, ten
+devices on "Blink" each blink on their own schedule and the room looks broken rather than
+synchronised.
+
+### Running it
+
+Always start with `--dry-run`. It discovers and resolves everything, prints exactly what it would
+send, and changes nothing:
+
+```bash
+scripts/wled_sync.py --effect Hiphotic --palette 'Ocean' --dry-run
+```
+
+Then for real:
+
+```bash
+scripts/wled_sync.py --effect Hiphotic --palette 'Ocean'
+scripts/wled_sync.py --effect Blink --color '#ff0000'      # colour-driven palette needed, see below
+scripts/wled_sync.py --host 192.168.1.39 --host 192.168.1.55 --effect Solid
+```
+
+Names are matched case-insensitively against what each device reports, not against a hard-coded
+table — effect and palette *numbers* differ between firmware builds, so a number that is "Hiphotic"
+on one device is something else on another. That is why this takes names.
+
+Devices are discovered on the local subnet by default. `--tailscale` additionally sweeps Tailscale
+peers; it is off by default because that is a different trust boundary. `--subnet` and `--host`
+override discovery.
+
+### Things that will surprise you
+
+- **A palette can silently override `--color`.** Most palettes supply their own colours and the
+  effect ignores the segment colour entirely. Pass a colour-driven palette (`Default`, `Color 1`,
+  `Colors 1&2`, `Color Gradient`, `Colors Only`) or your `--color` does nothing. The tool warns
+  when it spots this combination rather than leaving you to wonder.
+- **`--speed` and `--intensity` are deliberately not set by default.** They are usually tuned per
+  installation, so overwriting them across the fleet destroys local adjustment. Set them explicitly
+  if you want them uniform.
+- **Out-of-range speed/intensity is rejected up front.** WLED does not clamp: a value above 255
+  becomes 0, which freezes the animation on every device at once.
+- **Phase alignment is the default**; `--no-phase` turns it off, and devices then visibly drift
+  apart within seconds.
+
+### Options
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--effect` | — | Effect name, matched case-insensitively. |
+| `--palette` | — | Palette name. |
+| `--color` / `--colour` | — | `#RRGGBB` or `r,g,b`. Needs a colour-driven palette to be visible. |
+| `--speed` | unset | 0-255. Left alone unless given. |
+| `--intensity` | unset | 0-255. Same. |
+| `--dry-run` | off | Resolve and print; change nothing. |
+| `--no-phase` | off | Skip phase alignment. |
+| `--tailscale` | off | Also sweep Tailscale peers. |
+| `--subnet CIDR` | — | Explicit range instead of the local subnet (repeatable). |
+| `--host HOST` | — | Target specific hosts instead of sweeping (repeatable). |
+| `--timeout` | 2.0 | Per-request seconds for reads and writes. |
+| `--discovery-timeout` | 1.0 | Per-probe seconds while sweeping; short because most addresses are empty. |
+| `--workers` | 16 | Concurrent devices to apply to. |
+| `--discovery-workers` | 64 | Concurrent probes while sweeping. |
+
+Exit status is `0` only when every device found was updated; any failure exits `1` (usage errors,
+including an out-of-range `--speed`, exit `2`), so it is safe to use in a script.
+
+---
+
 ## Tests
+
+```bash
+make test-apjoin    # wled_apjoin only
+make test-sync      # wled_sync only
+make test           # everything in the repo
+```
+
+### `wled_apjoin.py`
 
 Pure logic and a fake platform — no radio, no network, no device:
 
@@ -246,3 +327,26 @@ make test             # everything in the repo
 The parts worth knowing are tested as safety properties rather than behaviours: that credentials are
 never sent to an AP that didn't identify itself as WLED-on-Espressif, that every path forgets the AP
 it joined, and that a 5 GHz or unknown-band network is never a candidate.
+
+### `wled_sync.py`
+
+```bash
+make test-sync      # just these
+make test           # everything in the repo
+```
+
+No hardware and no external network — the cross-version tests run against loopback HTTP stubs.
+Their name tables are **synthetic, not captured**: real names at the indices that matter, padded
+with filler (`["RSVD"] * 138` and friends) to put the same name at a different index per version.
+That is the property under test, and padding tests it exactly as well as a real table would.
+
+The assertions worth knowing about: the same effect *name* resolves to a different index per
+firmware version (the reason the tool syncs by name at all), the broadcast-suppression flag
+`udpn.nn` is on every request — without it a synced device re-broadcasts raw indices to the fleet
+and undoes the run — `--dry-run` writes nothing, `--speed`/`--intensity` outside 0-255 exit 2
+(WLED does not clamp: above 255 becomes 0 and freezes the fleet), and `verify_applied` rejects a
+state that does not hold what was asked for.
+
+One limit worth stating rather than implying: `verify_applied` is exercised **directly**, not
+through a stub round-trip — no stub serves `/json/state`. So the function is tested; the
+apply-then-verify path over HTTP is not.
