@@ -97,6 +97,10 @@ test-bridge:
 	  $(CXX) $(CXXFLAGS) -fpack-struct=1 -I HMTL/Libraries/HMTLprotocol -I ArduinoLibs/Socket \
 	    -o /tmp/wled_rs485_bridge_test_avr WLED/usermods/rs485_bridge/tests/rs485_bridge_test.cpp \
 	    && /tmp/wled_rs485_bridge_test_avr || exit 1; \
+	  echo "-- rs485_bridge_http_test --"; \
+	  $(CXX) $(CXXFLAGS) -I HMTL/Libraries/HMTLprotocol -I ArduinoLibs/Socket \
+	    -o /tmp/wled_rs485_http_test WLED/usermods/rs485_bridge/tests/rs485_bridge_http_test.cpp \
+	    && /tmp/wled_rs485_http_test || exit 1; \
 	fi
 
 # ArduinoLibs: the RS485 receive-path state-machine tests (stale-packet re-delivery, packet timeout,
