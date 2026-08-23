@@ -255,6 +255,27 @@ clean:
 # in TEST_TARGETS — test-ui needs Node, and `make test` must not start requiring npm.
 .PHONY: test $(TEST_TARGETS) test-ui test-all clean
 
-test: $(TEST_TARGETS)
+# Guard: a test-* target defined in this file but never registered is SILENTLY dropped from
+# `make test` — $(TEST_TARGETS) is expanded when the test: rule below is read, so a `+=` placed
+# after that point has no effect and nothing warns. The target still works when named explicitly,
+# so it passes a spot-check and then never runs in CI. That is the exact failure this change exists
+# to prevent, so it is checked rather than documented.
+.PHONY: check-test-registration
+check-test-registration:
+	@for t in $$(grep -oE '^test-[a-z0-9-]+:' $(firstword $(MAKEFILE_LIST)) | tr -d ':' | sort -u); do \
+	   case " $(TEST_TARGETS_AT_RULE) test-ui test-all " in \
+	     *" $$t "*) ;; \
+	     *) echo "ERROR: '$$t' is defined but not in TEST_TARGETS — it will never run in 'make test'."; \
+	        echo "       Add 'TEST_TARGETS += $$t' beside its definition, ABOVE the test: rule."; \
+	        exit 1;; \
+	   esac; \
+	 done
+
+# := is immediate, so this captures exactly the list the test: rule below receives. A `+=`
+# after this line changes TEST_TARGETS but NOT this snapshot — which is how the guard can
+# tell that a late registration was dropped.
+TEST_TARGETS_AT_RULE := $(TEST_TARGETS)
+
+test: check-test-registration $(TEST_TARGETS)
 	@echo ""
 	@echo "OK — all submodule host tests passed."
