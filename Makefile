@@ -6,6 +6,7 @@
 #   make test-libs  # just the ArduinoLibs RS485 receive-path tests
 #   make test-hmtl  # just the HMTL cross-ABI wire-layout sweep + its negative control
 #   make test-router# just the esp-now-router relay + leader-election tests
+#   make test-sync  # just the WLED sensor-sync/ctrl host tests
 #   make test-apjoin# just the scripts/wled_apjoin.py host tests (see scripts/README.md)
 #   make test-readme# verify README.md's claims against the source files
 #   make test-ui    # WLED web-UI builder test (needs Node)
@@ -17,11 +18,19 @@
 CXX      ?= c++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra
 
-.PHONY: test test-wled test-bridge test-libs test-hmtl test-router test-readme test-ui test-all clean test-sync test-apjoin
-
-test: test-wled test-bridge test-libs test-hmtl test-router test-readme test-sync test-apjoin
-	@echo ""
-	@echo "OK — all submodule host tests passed."
+# Each test target registers itself with TEST_TARGETS beside its own definition, so adding a target
+# touches only that target's own lines. The old form listed every target on two shared lines, which
+# meant any two branches adding a target conflicted regardless of how unrelated their work was.
+#
+# `test:` and the .PHONY list live at the FOOT of this file: `+=` accumulates in file order, so a
+# .PHONY referencing $(TEST_TARGETS) before the registrations expands to an empty list — silently,
+# because .PHONY is only a hint until a file of that name exists.
+#
+# Moving `test:` to the foot also stops it being the first target, so the default goal is pinned
+# explicitly here — otherwise a bare `make` would run whatever target happens to appear first and
+# quietly run only part of the suite.
+TEST_TARGETS :=
+.DEFAULT_GOAL := test
 
 # Guard: a submodule that was never initialized is a SETUP problem — fail loudly with the fix.
 # A submodule that is checked out but carries no tests at its pinned revision is not an error:
@@ -65,6 +74,7 @@ endif
 
 # WLED (ampworks): the SensorSync dispatch + SPSC ring host tests. Compiled from their own dir so
 # the relative "../sensor_sync_*.h" includes resolve.
+TEST_TARGETS += test-wled
 test-wled:
 	@echo "== WLED ampworks host tests =="
 	$(call require_submodule,WLED)
@@ -81,6 +91,7 @@ test-wled:
 # -fpack-struct=1: the second is the AVR-like ABI, and the point of most of those assertions is that
 # the two agree. Previously these had to be run by hand, so `make test` reported success without ever
 # touching them.
+TEST_TARGETS += test-bridge
 test-bridge:
 	@echo "== WLED rs485_bridge host tests =="
 	$(call require_submodule,WLED)
@@ -106,6 +117,7 @@ test-bridge:
 # ArduinoLibs: the RS485 receive-path state-machine tests (stale-packet re-delivery, packet timeout,
 # socket-layer length validation, allocation failure). Delegates to that repo's own test Makefile,
 # which owns the Arduino.h shim and the -DRS485_HARDWARE_SERIAL that the library requires.
+TEST_TARGETS += test-libs
 test-libs:
 	@echo "== ArduinoLibs host tests =="
 	$(call require_submodule,ArduinoLibs)
@@ -154,6 +166,7 @@ test-libs:
 # pinned toolchain is a separate decision about this repo's dependency set — filed, not smuggled in.
 PIO ?= ./.venv/bin/pio
 
+TEST_TARGETS += test-hmtl
 test-hmtl:
 	@echo "== HMTL cross-ABI wire layout sweep =="
 	$(call require_submodule,HMTL)
@@ -182,6 +195,7 @@ test-hmtl:
 # esp-now-router: the relay + leader-election host tests (delegates to that repo's own Makefile,
 # which knows the -I paths into the WLED submodule). `pio test -e native` is the idiomatic
 # alternative from inside the esp-now-router dir.
+TEST_TARGETS += test-router
 test-router:
 	@echo "== esp-now-router host tests =="
 	$(call require_submodule,esp-now-router)
@@ -193,6 +207,7 @@ test-router:
 
 # Fleet sync tool (top-level, not a submodule): name resolution, request-body construction and a
 # cross-version check against local stub servers. Pure Python, no hardware, no submodule needed.
+TEST_TARGETS += test-sync
 test-sync:
 	@echo "== wled_sync host tests =="
 	@if [ ! -f tests/test_wled_sync.py ]; then \
@@ -204,6 +219,7 @@ test-sync:
 # AP auto-join tool: candidate selection, identity gating and the safety properties (never push to
 # an unidentified AP; always forget the AP we joined). Pure Python against a fake platform — no
 # radio is touched.
+TEST_TARGETS += test-apjoin
 test-apjoin:
 	@echo "== wled_apjoin host tests =="
 	@if [ ! -f tests/test_wled_apjoin.py ]; then \
@@ -213,6 +229,7 @@ test-apjoin:
 	fi
 # README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
 # so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
+TEST_TARGETS += test-readme
 test-readme:
 	@echo "== README claim checks =="
 	$(call require_submodule,WLED)
@@ -232,3 +249,12 @@ clean:
 	@$(MAKE) --no-print-directory -C HMTL/tests/layout clean 2>/dev/null || true
 	@rm -f /tmp/wled_sensor_sync_test /tmp/wled_sensor_sync_ring_test /tmp/wled_sensor_control_test
 	@rm -f /tmp/wled_rs485_bridge_test /tmp/wled_rs485_bridge_test_avr
+
+# --- default aggregate target -------------------------------------------------------------------
+# Must stay at the foot: see the note beside TEST_TARGETS. test-ui and test-all are deliberately NOT
+# in TEST_TARGETS — test-ui needs Node, and `make test` must not start requiring npm.
+.PHONY: test $(TEST_TARGETS) test-ui test-all clean
+
+test: $(TEST_TARGETS)
+	@echo ""
+	@echo "OK — all submodule host tests passed."
