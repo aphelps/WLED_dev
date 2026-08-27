@@ -71,13 +71,14 @@ take — or you flashed a different device.
 
 There are **two separate PlatformIO projects** here, and conflating them is the usual mistake.
 
-`WLED/platformio.ini` — 37 environments, most of them upstream's. Ours are:
+`WLED/platformio.ini` — 38 environments, most of them upstream's. Ours are:
 
 | Env | Hardware |
 |---|---|
 | `ampworks` | ESP32 dev board: MPR121 touch + RS485 bridge on Serial2 |
 | `apa102_mpr121` | APA102 LEDs on HSPI, MPR121 on I2C pins 19/22 |
 | `display_only` | Sensor-sync + effects, with **no** local MPR121 |
+| `led_driver_lora1ch` | SparkFun ESP32 LoRa 1-CH Gateway: WS2801 on 25/23 + RS485 bridge, no MPR121 |
 
 Picking `ampworks` for an APA102+MPR121 board is why a touch sensor "isn't found" — the pins differ.
 These three are exactly what CI compiles.
