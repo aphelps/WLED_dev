@@ -46,14 +46,21 @@ ESP32 targets, starting with `nodemcuv2`). It will take a long time and produce 
 
 ### Flash it
 
-Uploads go over HTTP rather than the usual OTA protocol, because macOS Sequoia blocks the UDP that
-espota needs. The upload target is wired to `tools/upload_wled.py`, which POSTs the `.bin` to the
-device's `/update` endpoint:
+`tools/upload_wled.py` picks the path from the target you give it. Over the network it POSTs the
+`.bin` to the device's `/update` endpoint (HTTP rather than espota, because macOS Sequoia blocks the
+UDP espota needs); given a serial port it hands the upload to the platform's normal esptool path.
 
 ```bash
 pio run -e ampworks -t upload                      # default device (192.168.1.55)
-WLED_IP=192.168.1.99 pio run -e ampworks -t upload # any other device
+WLED_IP=192.168.1.99 pio run -e ampworks -t upload # any other device, forces OTA
+
+# Over the cable — the route a FACTORY-FRESH board needs, since it has no IP yet:
+pio run -e ampworks -t upload --upload-port /dev/cu.usbserial-0001
 ```
+
+The cable form applies to every env in the `ampworks` family (`apa102_mpr121`, `display_only`,
+`led_driver_*`). Port names reshuffle between sessions, so confirm which board you are addressing
+with `esptool.py --port <port> chip_id` rather than trusting the name from last time.
 
 ### Verify what is actually running
 

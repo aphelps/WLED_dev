@@ -135,7 +135,7 @@ inside `esp-now-router/`, and `make -C esp-now-router/tests coverage` gives gcov
 | `const.h` | Compile-time constants (max buses, effect counts, etc.) |
 | `fcn_declare.h` | All global function forward declarations |
 | `tools/set_build_info.py` | Pre-build script: injects `WLED_GIT_HASH/BRANCH/BUILD_TIME` → `/json/info` fields `git`/`branch`/`built` |
-| `tools/upload_wled.py` | Custom upload: HTTP POST to `/update` via curl |
+| `tools/upload_wled.py` | Custom upload: serial target -> platform esptool; network target -> HTTP POST to `/update` via curl. Registered as both `pre:` and `post:` — see its docstring |
 
 ### Feature Flags (in `wled.h`)
 
