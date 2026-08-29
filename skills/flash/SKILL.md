@@ -24,12 +24,26 @@ DEV="${1:-${WLED_IP:-}}"     # host or IP; if empty, upload_wled.py uses its own
    Append `+dirty` if `git -C WLED status --porcelain` is non-empty — a dirty tree means the binary
    corresponds to no commit.
 
-2. **Build and upload** from the `WLED/` directory (`platformio.ini` paths are relative to it):
+2. **Build and upload** from the `WLED/` directory (`platformio.ini` paths are relative to it).
+   Two routes; `tools/upload_wled.py` picks by the target it is given.
+
+   **Over the network** (device already on WiFi):
    ```bash
    WLED_IP="$DEV" pio run -e "$ENV" -t upload
    ```
-   Upload is an HTTP POST to `/update` (`tools/upload_wled.py`), not espota — macOS blocks the UDP
-   espota needs.
+   An HTTP POST to `/update`, not espota — macOS blocks the UDP espota needs.
+
+   **Over the cable** — required for a FACTORY-FRESH board, which has no IP for OTA to reach:
+   ```bash
+   pio run -e "$ENV" -t upload --upload-port /dev/cu.usbserial-XXXX
+   ```
+   A serial target routes to the platform's esptool path instead. Identify the port first —
+   names reshuffle between sessions:
+   ```bash
+   esptool.py --port /dev/cu.usbserial-XXXX chip_id     # confirm the MAC before flashing
+   ```
+   Step 3's verification needs the device's address, so for a fresh board it applies only after
+   first boot and provisioning.
 
 3. **Confirm the running build** matches step 1, polling while the device reboots (~6 × 5s):
    ```bash
