@@ -1,5 +1,5 @@
 ---
-name: flash
+name: wled-flash
 description: Build and upload firmware to a WLED device over HTTP OTA or USB serial, then confirm the running build matches local git state. PlatformIO environment and target address are both parameters — no device or address baked in.
 disable-model-invocation: true
 ---

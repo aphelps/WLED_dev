@@ -62,4 +62,4 @@ Anything wider than a /22 is refused, so a misconfigured interface cannot start 
 - `LEDS` (`info.leds.count`) and the summed bus lengths can disagree; that gap is itself a finding.
 
 Related: `check-device` for one device in depth, `configure-device` to fix what this turns up,
-`flash` to update it.
+`wled-flash` to update it.
