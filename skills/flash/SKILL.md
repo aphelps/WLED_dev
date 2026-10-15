@@ -1,6 +1,6 @@
 ---
 name: flash
-description: Build and upload firmware to a WLED device over HTTP OTA, then confirm the running build matches local git state. PlatformIO environment and target address are both parameters — no device or address baked in.
+description: Build and upload firmware to a WLED device over HTTP OTA or USB serial, then confirm the running build matches local git state. PlatformIO environment and target address are both parameters — no device or address baked in.
 disable-model-invocation: true
 ---
 
@@ -35,13 +35,16 @@ DEV="${1:-${WLED_IP:-}}"     # host or IP; if empty, upload_wled.py uses its own
 
    **Over the cable** — required for a FACTORY-FRESH board, which has no IP for OTA to reach:
    ```bash
-   pio run -e "$ENV" -t upload --upload-port /dev/cu.usbserial-XXXX
+   PORT="${PORT:?set PORT=/dev/cu.usbserial-XXXX (see below for how to identify it)}"
+   pio run -e "$ENV" -t upload --upload-port "$PORT"
    ```
    A serial target routes to the platform's esptool path instead. Identify the port first —
    names reshuffle between sessions:
    ```bash
-   esptool.py --port /dev/cu.usbserial-XXXX chip_id     # confirm the MAC before flashing
+   esptool.py --port "$PORT" chip_id     # confirm the MAC before flashing
    ```
+   (`esptool.py` is PlatformIO's copy at `~/.platformio/packages/tool-esptoolpy/esptool.py` if it is
+   not on PATH.)
    Step 3's verification needs the device's address, so for a fresh board it applies only after
    first boot and provisioning.
 

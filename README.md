@@ -58,9 +58,11 @@ WLED_IP=192.168.1.99 pio run -e ampworks -t upload # any other device, forces OT
 pio run -e ampworks -t upload --upload-port /dev/cu.usbserial-0001
 ```
 
-The cable form applies to every env in the `ampworks` family (`apa102_mpr121`, `display_only`,
-`led_driver_*`). Port names reshuffle between sessions, so confirm which board you are addressing
-with `esptool.py --port <port> chip_id` rather than trusting the name from last time.
+The cable form applies to every env in the `ampworks` family (`apa102_mpr121`, `display_only`;
+`led_driver_lora1ch` is cable-only — it does not use `upload_wled.py`). Port names reshuffle between
+sessions, so confirm which board you are addressing with `esptool.py --port <port> chip_id`
+(PlatformIO's copy: `~/.platformio/packages/tool-esptoolpy/esptool.py`) rather than trusting the
+name from last time.
 
 ### Verify what is actually running
 
