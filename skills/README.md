@@ -43,13 +43,13 @@ they're linked.
 | Skill | For |
 |---|---|
 | `wled-scan` | Find every WLED device on the LAN and Tailscale and table their config. Provides the `wleds` command. |
-| `flash` | Build firmware and push it to a device over HTTP OTA, then prove the running build is the one you meant. |
+| `wled-flash` | Build firmware and push it to a device over HTTP OTA or USB serial, then prove the running build is the one you meant. |
 | `check-device` | Ask a device what it's running — version, commit, branch, uptime, heap. |
 | `configure-device` | Set a device up over the JSON API: LED bus type and pins, 2D matrix, I2C, ESP-NOW. Also the traps where a config looks accepted but isn't. |
 | `new-effect` | Adding an LED effect to `usermods/ampworks` — skeleton, the PROGMEM descriptor format, registration, audio and touch data. |
 | `amp-coding-style` | House style for C/C++ and Python in this repo. |
 
-Rough order for a new device: `wleds` (find it) → `flash` → `check-device` → `configure-device`.
+Rough order for a new device: `wleds` (find it) → `wled-flash` → `check-device` → `configure-device`.
 
 ## No addresses, no absolute paths
 

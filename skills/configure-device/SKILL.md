@@ -3,7 +3,7 @@ name: configure-device
 description: Configure a WLED device over the JSON API — LED bus type and pins (1-wire vs 2-wire), 2D matrix, I2C/MPR121, ESP-NOW sensor sync — plus the traps that make a correct-looking config silently not take effect.
 ---
 
-Complements `flash` (build + upload) and `check-device` (report running build). This one is about
+Complements `wled-flash` (build + upload) and `check-device` (report running build). This one is about
 what to POST *after* the firmware is on, and why a change sometimes appears to be accepted and
 then does nothing.
 

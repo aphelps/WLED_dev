@@ -1,6 +1,6 @@
 ---
-name: flash
-description: Build and upload firmware to a WLED device over HTTP OTA, then confirm the running build matches local git state. PlatformIO environment and target address are both parameters — no device or address baked in.
+name: wled-flash
+description: Build and upload firmware to a WLED device over HTTP OTA or USB serial, then confirm the running build matches local git state. PlatformIO environment and target address are both parameters — no device or address baked in.
 disable-model-invocation: true
 ---
 
@@ -24,12 +24,30 @@ DEV="${1:-${WLED_IP:-}}"     # host or IP; if empty, upload_wled.py uses its own
    Append `+dirty` if `git -C WLED status --porcelain` is non-empty — a dirty tree means the binary
    corresponds to no commit.
 
-2. **Build and upload** from the `WLED/` directory (`platformio.ini` paths are relative to it):
+2. **Build and upload** from the `WLED/` directory (`platformio.ini` paths are relative to it).
+   Two routes; `tools/upload_wled.py` picks by the target it is given.
+
+   **Over the network** (device already on WiFi):
    ```bash
    WLED_IP="$DEV" pio run -e "$ENV" -t upload
    ```
-   Upload is an HTTP POST to `/update` (`tools/upload_wled.py`), not espota — macOS blocks the UDP
-   espota needs.
+   An HTTP POST to `/update`, not espota — macOS blocks the UDP espota needs.
+
+   **Over the cable** — required for a FACTORY-FRESH board, which has no IP for OTA to reach:
+   ```bash
+   PORT="${PORT:?set PORT=/dev/cu.usbserial-XXXX (see below for how to identify it)}"
+   pio run -e "$ENV" -t upload --upload-port "$PORT"
+   ```
+   A serial target routes to the platform's esptool path instead. Identify the port first —
+   names reshuffle between sessions:
+   ```bash
+   ../.venv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py --port "$PORT" chip_id   # confirm the MAC before flashing
+   ```
+   (Through the venv's python deliberately: the wrapper's `#!/usr/bin/env python` shebang fails on
+   stock macOS, where `python` is not on PATH, and the system `python3` lacks `pyserial`. This form
+   works whether or not `.venv` is activated.)
+   Step 3's verification needs the device's address, so for a fresh board it applies only after
+   first boot and provisioning.
 
 3. **Confirm the running build** matches step 1, polling while the device reboots (~6 × 5s):
    ```bash

@@ -227,6 +227,19 @@ test-apjoin:
 	else \
 	  python3 tests/test_wled_apjoin.py; \
 	fi
+# Upload-path decision for the ampworks family: serial vs OTA, and the CLI-precedence rule that
+# --upload-port must beat platformio.ini. Pure Python against a fake SCons env — no device, no
+# radio, no flashing. Lives in the WLED submodule because that is where the script it tests lives.
+TEST_TARGETS += test-upload
+test-upload:
+	@echo "== wled upload-path host tests =="
+	$(call require_submodule,WLED)
+	@if [ ! -f WLED/tests/test_upload_wled.py ]; then \
+	  $(call missing_tests,no WLED/tests/test_upload_wled.py at the pinned WLED revision); \
+	else \
+	  python3 WLED/tests/test_upload_wled.py; \
+	fi
+
 # README claim-checker. The README is what a remote collaborator sets up from with nobody to ask,
 # so its claims are verified against platformio.ini / Makefile / .gitmodules rather than trusted.
 TEST_TARGETS += test-readme
