@@ -41,10 +41,11 @@ DEV="${1:-${WLED_IP:-}}"     # host or IP; if empty, upload_wled.py uses its own
    A serial target routes to the platform's esptool path instead. Identify the port first —
    names reshuffle between sessions:
    ```bash
-   esptool.py --port "$PORT" chip_id     # confirm the MAC before flashing
+   ../.venv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py --port "$PORT" chip_id   # confirm the MAC before flashing
    ```
-   (`esptool.py` is PlatformIO's copy at `~/.platformio/packages/tool-esptoolpy/esptool.py` if it is
-   not on PATH.)
+   (Through the venv's python deliberately: the wrapper's `#!/usr/bin/env python` shebang fails on
+   stock macOS, where `python` is not on PATH, and the system `python3` lacks `pyserial`. This form
+   works whether or not `.venv` is activated.)
    Step 3's verification needs the device's address, so for a fresh board it applies only after
    first boot and provisioning.
 

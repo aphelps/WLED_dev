@@ -61,7 +61,9 @@ pio run -e ampworks -t upload --upload-port /dev/cu.usbserial-0001
 The cable form applies to every env in the `ampworks` family (`apa102_mpr121`, `display_only`;
 `led_driver_lora1ch` is cable-only — it does not use `upload_wled.py`). Port names reshuffle between
 sessions, so confirm which board you are addressing with `esptool.py --port <port> chip_id`
-(PlatformIO's copy: `~/.platformio/packages/tool-esptoolpy/esptool.py`) rather than trusting the
+(PlatformIO's copy: `~/.platformio/packages/tool-esptoolpy/esptool.py`; outside the activated `.venv`
+run it as `../.venv/bin/python ~/.platformio/packages/tool-esptoolpy/esptool.py …` — its
+`#!/usr/bin/env python` shebang finds no `python` on stock macOS) rather than trusting the
 name from last time.
 
 ### Verify what is actually running
